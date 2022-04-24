@@ -42,7 +42,7 @@ class Qemu
     args << "-m #{@memory}"
 
     # enable USB
-    args << "-usb"
+    args << "-device qemu-xhci,id=xhci"
 
     # add HDD
     raise "No valid disk image given: '#{@image}'" unless File.exists? @image.to_s
@@ -68,7 +68,7 @@ class Qemu
     else
       args << "-vga virtio"
       args << "-display default,show-cursor=on"
-      args << "-device usb-tablet"
+      args << "-device usb-tablet,bus=xhci.0"
     end
 
     "#{executable} #{args.join(' ')}"
