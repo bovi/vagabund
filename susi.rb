@@ -1,9 +1,24 @@
 #!/usr/bin/env ruby
 
+require 'json'
+require 'securerandom'
+
+USER_FOLDER = "~/.susi"
+LOCAL_FOLDER = "./.susi"
+ENV_FILE = "susi.json"
+
 class Qemu
-  def initialize(arch: :x86, memory: 1024, image: nil, iso: nil,
+  def initialize(name: nil, arch: :x86, memory: 1024, image: nil, iso: nil,
                  network_card: 'virtio-net-pci', port_forward: nil,
-                 headless: true)
+                 headless: true, usb: nil)
+    @guest_name = if name.nil?
+      SecureRandom.uuid
+    else
+      unless name.match /^[\s\-\_\+\.\=0-9a-zA-Z]+$/
+        raise "Invalid guest name (allowed characters: a-z A-Z 0-9 + - = _ . )" 
+      end
+      name
+    end
     @arch = arch
     @memory = memory
     @image = image
@@ -11,6 +26,11 @@ class Qemu
     @network_card = network_card
     @port_forward = port_forward || []
     @headless = headless
+    @usb = usb
+  end
+
+  def hostname
+    @guest_name.gsub(/\s/, "").downcase
   end
 
   def cmd
@@ -42,10 +62,16 @@ class Qemu
     args << "-m #{@memory}"
 
     # enable USB
-    args << "-device qemu-xhci,id=xhci"
+    unless @usb.nil?
+      args << "-device qemu-xhci,id=xhci"
+      @usb.each do |x|
+        args << "-device usb-host,vendorid=#{x['vendor']},productid=#{x['product']},id=#{x['name']}"
+      end
+    end
 
-    # add HDD
-    raise "No valid disk image given: '#{@image}'" unless File.exists? @image.to_s
+    # add boot drive
+    @image = "#{LOCAL_FOLDER}/guests/#{hostname}/boot.qcow2" if @image.nil?
+    raise "No valid disk image available: '#{@image}'" unless File.exists? @image.to_s
     args << "-drive file=#{@image},if=virtio"
 
     # add CDROM
@@ -57,7 +83,7 @@ class Qemu
     # add network capability
     unless @network_card.nil?
       args << "-device #{@network_card},netdev=net0"
-      hostfwd = @port_forward.map {|x| ",hostfwd=tcp:localhost:#{x[:host]}-localhost:#{x[:guest]}"}.join
+      hostfwd = @port_forward.map {|x| ",hostfwd=tcp::#{x[:host]}-:#{x[:guest]}"}.join
       args << "-netdev user,id=net0#{hostfwd}"
     end
 
@@ -70,6 +96,13 @@ class Qemu
       args << "-display default,show-cursor=on"
       args << "-device usb-tablet,bus=xhci.0"
     end
+
+    # activate VNC
+    args << "-vnc :99,password=on"
+
+    # activate QMP
+    args << "-chardev socket,id=mon0,host=localhost,port=4444,server=on,wait=off"
+    args << "-mon chardev=mon0,mode=control,pretty=on"
 
     "#{executable} #{args.join(' ')}"
   end
@@ -109,6 +142,22 @@ class Qemu
   end
 end
 
+env = if File.exists? ENV_FILE
+  JSON.parse(File.read(ENV_FILE))
+else
+  {"guests" => []}
+end
+
+case ARGV[0]
+when 'up'
+  env['guests'].each do |guest|
+    vm = Qemu.new(**guest.transform_keys(&:to_sym))
+    puts vm.cmd
+  end
+when 'down'
+end
+
+=begin
 case ARGV[0]
 when 'create'
   f = ARGV[1]
@@ -116,11 +165,15 @@ when 'create'
   Qemu.create_disk(f, s)
 when 'start'
   f = ARGV[1]
-  vm = Qemu.new(image: f, port_forward: [{host: 51822, guest: 22}])
+  vm = Qemu.new(image: f, port_forward: [{host: 51822, guest: 22}], headless: false)
   puts vm.cmd
 when 'install'
   f = ARGV[1]
   iso = ARGV[2]
   vm = Qemu.new(image: f, iso: iso, port_forward: [{host: 51822, guest: 22}], headless: false)
   puts vm.cmd
-end
+when 'vnc'
+  vnc_open = "open vnc://dabo:dabo@127.0.0.1:5999"
+when 'ssh'
+  vnc_ssh = "open ssh://dabo@localhost:51822"
+=end

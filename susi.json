@@ -1,0 +1,10 @@
+{
+  "guests": [
+    {
+      "name": "Test Machine",
+      "usb": [
+       {"name": "fpga", "vendor": "0x0403", "product": "0x6010"}
+      ]
+    }
+  ]
+}
