@@ -1,59 +1,126 @@
 #!/usr/bin/env ruby
 
-# Create a QCOW2 image
-#
-# Arguments:
-#   file:   location of the image
-#   size:   size of the image (in GB)
-def create_disk(file, size)
-  puts "Create #{file} (Size: #{size}GB)"
-  cmd = "qemu-img create -q -f qcow2 #{file} #{size}G 2>&1"
-  result = system(cmd)
-  unless result
-    raise "ERROR: Could not create disk #{file} with size #{size}G.\nReturn: '#{result}'"  
+class Qemu
+  def initialize(arch: :x86, memory: 1024, image: nil, iso: nil,
+                 network_card: 'virtio-net-pci', port_forward: nil,
+                 headless: true)
+    @arch = arch
+    @memory = memory
+    @image = image
+    @iso = iso
+    @network_card = network_card
+    @port_forward = port_forward || []
+    @headless = headless
   end
-end
 
-def start_vm(disk, memory, iso: nil, headless: false)
-  raise "VM Disk Image is wrong" unless File.exists? disk.to_s
-  raise "VM Memory setting is wrong" unless memory.is_a? Numeric and memory > 0
-  # if iso is given, we add it to the VM
-  cd_args = if iso.nil?
-    ''
-  else
-    raise "ISO Image is wrong" unless File.exists? iso.to_s
-    "-cdrom #{iso}"
+  def cmd
+    args = []
+
+    # qemu executable based on architecture
+    executable = case @arch
+    when :x86
+      'qemu-system-x86_64'
+    when :arm64
+      'qemu-system-aarch64'
+    else
+      raise "Unknown architecture: #{@arch}"
+    end
+
+    # architeccture of virtual machine guest
+    machine = case @arch
+    when :x86
+      'q35'
+    when :arm64
+      'virt'
+    end
+    args << "-machine type=#{machine}"
+
+    # use accelerator if the architecture is correct
+    args << "-accel hvf" if accelerator_support == @arch
+
+    # add RAM (in MB)
+    args << "-m #{@memory}"
+
+    # enable USB
+    args << "-usb"
+
+    # add HDD
+    raise "No valid disk image given: '#{@image}'" unless File.exists? @image.to_s
+    args << "-drive file=#{@image},if=virtio"
+
+    # add CDROM
+    unless @iso.nil?
+      raise "No valid iso image given: '#{@iso}'" unless File.exists? @iso.to_s
+      args << "-cdrom #{@iso}"
+    end
+
+    # add network capability
+    unless @network_card.nil?
+      args << "-device #{@network_card},netdev=net0"
+      hostfwd = @port_forward.map {|x| ",hostfwd=tcp:localhost:#{x[:host]}-localhost:#{x[:guest]}"}.join
+      args << "-netdev user,id=net0#{hostfwd}"
+    end
+
+    # add video graphic card support (headless or not?)
+    if @headless
+      args << "-vga none"
+      args << "-nographic"
+    else
+      args << "-vga virtio"
+      args << "-display default,show-cursor=on"
+      args << "-device usb-tablet"
+    end
+
+    "#{executable} #{args.join(' ')}"
   end
+
+  # Create a QCOW2 image
   #
-  io_args = if headless
-    "-nographic"
-  else
-    "-vga virtio -display default,show-cursor=on -device usb-tablet"
+  # Arguments:
+  #   file:   location of the image
+  #   size:   size of the image (in GB)
+  def Qemu.create_disk(file, size)
+    puts "Create #{file} (Size: #{size}GB)"
+    cmd = "qemu-img create -q -f qcow2 #{file} #{size}G 2>&1"
+    result = `#{cmd}`
+    unless result
+      raise "ERROR: Could not create disk #{file} with size #{size}G.\nReturn: '#{result}'"  
+    end
   end
-  cmd = <<CMD
-qemu-system-x86_64 \
--m #{memory}G \
-#{io_args} \
--usb \
--machine type=q35,accel=hvf \
--smp 2 \
-#{cd_args} \
--drive file=#{disk},if=virtio \
--cpu Nehalem \
--device e1000,netdev=net0 -netdev user,id=net0,hostfwd=tcp::5555-:22
-CMD
 
-  puts cmd
+  private
+
+  # Which architecture is supported by the accelerator?
+  #
+  # Return:
+  #   :x86      - accelerator for x86 guests
+  #   :arm64    - accelerator for AARCH64 guests
+  #   :none     - no accelerator available
+  def accelerator_support
+    result_x86 = `qemu-system-x86_64 -accel help 2>&1`
+    result_arm = `qemu-system-aarch64 -accel help 2>&1`
+    if result_x86.include? 'hvf'
+      :x86
+    elsif result_arm.include? 'hvf'
+      :arm64
+    else
+      :none
+    end
+  end
 end
 
 case ARGV[0]
 when 'create'
   f = ARGV[1]
   s = ARGV[2]
-  create_disk(f, s)
+  Qemu.create_disk(f, s)
 when 'start'
   f = ARGV[1]
-  m = ARGV[2].to_i
-  i = ARGV[3]
-  start_vm(f, m, iso: i, headless: false)
+  vm = Qemu.new(image: f, port_forward: [{host: 51822, guest: 22}])
+  puts vm.cmd
+when 'install'
+  f = ARGV[1]
+  iso = ARGV[2]
+  vm = Qemu.new(image: f, iso: iso, port_forward: [{host: 51822, guest: 22}], headless: false)
+  puts vm.cmd
 end
