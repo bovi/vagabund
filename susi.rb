@@ -155,6 +155,8 @@ when 'up'
     puts vm.cmd
   end
 when 'down'
+when 'create'
+  Qemu.create_disk(ARGV[1], ARGV[2])
 end
 
 =begin
