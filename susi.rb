@@ -155,27 +155,7 @@ when 'up'
     puts vm.cmd
   end
 when 'down'
+  # TODO: implement shutdown of the VM
 when 'create'
   Qemu.create_disk(ARGV[1], ARGV[2])
 end
-
-=begin
-case ARGV[0]
-when 'create'
-  f = ARGV[1]
-  s = ARGV[2]
-  Qemu.create_disk(f, s)
-when 'start'
-  f = ARGV[1]
-  vm = Qemu.new(image: f, port_forward: [{host: 51822, guest: 22}], headless: false)
-  puts vm.cmd
-when 'install'
-  f = ARGV[1]
-  iso = ARGV[2]
-  vm = Qemu.new(image: f, iso: iso, port_forward: [{host: 51822, guest: 22}], headless: false)
-  puts vm.cmd
-when 'vnc'
-  vnc_open = "open vnc://dabo:dabo@127.0.0.1:5999"
-when 'ssh'
-  vnc_ssh = "open ssh://dabo@localhost:51822"
-=end
