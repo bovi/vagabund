@@ -115,6 +115,8 @@ class Qemu
     end
 
     # enable USB
+    #
+    # TODO: debug this part, it seems when I put this before the hostfwd it has a conflict
     unless @usb.nil?
       args << "-device qemu-xhci,id=xhci"
       @usb.each do |x|
