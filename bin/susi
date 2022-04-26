@@ -144,6 +144,15 @@ class Qemu
     end
   end
 
+  def Qemu.link_disk(file, base_file)
+    puts "Create #{file} linked clone of #{base_file}"
+    cmd = "qemu-img create -q -f qcow2 -F qcow2 -b #{base_file} #{file}"
+    result = `#{cmd}`
+    unless result
+      raise "ERROR: Could not create disk #{file} as a link cloned from #{base_file}.\nReturn: '#{result}'"
+    end
+  end
+
   def hostname
     @guest_name.gsub(/\s/, "").downcase
   end
@@ -158,7 +167,7 @@ class Qemu
       default_boot_file << 'ubuntu-22.04-server'
       default_boot_file << 'amd64'
       default_boot_file << 'ubuntu-22.04-server-amd64.qcow2'
-      FileUtils::cp(File.join(default_boot_file), file, verbose: true)
+      Qemu.link_disk(file, File.join(default_boot_file))
     end
 
     file
