@@ -1,0 +1,274 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'securerandom'
+require 'fileutils'
+require 'socket'
+
+USER_FOLDER = "~/.susi"
+LOCAL_FOLDER = "./.susi"
+ENV_FILE = "susi.json"
+
+class Qemu
+  def initialize(name: nil, arch: :x86, memory: 1024, image: nil, iso: nil,
+                 network_card: 'virtio-net-pci', port_forward: nil,
+                 headless: true, usb: nil, vnc_id: nil, qmp_port: nil)
+    @guest_name = if name.nil?
+      SecureRandom.uuid
+    else
+      unless name.match /^[\s\-\_\+\.\=0-9a-zA-Z]+$/
+        raise "Invalid guest name (allowed characters: a-z A-Z 0-9 + - = _ . )" 
+      end
+      name
+    end
+    @arch = arch
+    @memory = memory
+    @image = image
+    @iso = iso
+    @network_card = network_card
+    @port_forward = port_forward || []
+    @headless = headless
+    @usb = usb
+    @vnc_id = vnc_id
+    @qmp_port = qmp_port
+  end
+
+  def cmd
+    args = []
+
+    # qemu executable based on architecture
+    executable = case @arch
+    when :x86
+      'qemu-system-x86_64'
+    when :arm64
+      'qemu-system-aarch64'
+    else
+      raise "Unknown architecture: #{@arch}"
+    end
+
+    # architeccture of virtual machine guest
+    machine = case @arch
+    when :x86
+      'q35'
+    when :arm64
+      'virt'
+    end
+    args << "-machine type=#{machine}"
+
+    if @arch == :arm64
+      args << "-cpu cortex-a72"
+    end
+
+    # use accelerator if the architecture is correct
+    args << "-accel hvf" if accelerator_support == @arch
+
+    # add RAM (in MB)
+    args << "-m #{@memory}"
+
+    # add boot drive
+    if @arch == :arm64
+      #args << "-device virtio-blk-pci,drive=drv0"
+      #args << "-drive format=qcow2,file=#{@image},if=none,id=drv0"
+      #args << "-bios #{File.expand_path(USER_FOLDER)}/arm64/edk2-aarch64-code.fd"
+    elsif @arch == :x86
+      args << "-drive file=#{boot_disk_file},if=virtio"
+    else
+      raise 'Could not add drive for this architecture'
+    end
+
+    # add CDROM
+    unless @iso.nil?
+      raise "No valid iso image given: '#{@iso}'" unless File.exists? @iso.to_s
+      #if @arch == :arm64
+      #  args << "-device virtio-scsi"
+      #  args << "-device scsi-cd,drive=cd"
+      #  args << "-drive if=none,id=cd,format=raw,file=#{@iso}"
+      #else
+        args << "-cdrom #{@iso}"
+      #end
+    end
+
+    # add network capability
+    unless @network_card.nil?
+      args << "-device #{@network_card},netdev=net0"
+      hostfwd = @port_forward.map {|x| ",hostfwd=tcp::#{x[:host]}-:#{x[:guest]}"}.join
+      args << "-netdev user,id=net0#{hostfwd}"
+    end
+
+    # add video graphic card support (headless or not?)
+    if @headless
+      #args << "-vga none"
+      #args << "-nographic"
+    else
+      args << "-vga virtio"
+      args << "-display default,show-cursor=on"
+      args << "-device usb-tablet,bus=xhci.0"
+    end
+
+    # activate VNC
+    args << "-vnc localhost:#{@vnc_id},password=on" unless @vnc_id.nil?
+
+    unless @qmp_port.nil?
+      # activate QMP
+      args << "-chardev socket,id=mon0,host=localhost,port=#{@qmp_port},server=on,wait=off"
+      args << "-mon chardev=mon0,mode=control,pretty=on"
+    end
+
+    # enable USB
+    unless @usb.nil?
+      args << "-device qemu-xhci,id=xhci"
+      @usb.each do |x|
+        args << "-device usb-host,vendorid=#{x['vendor']},productid=#{x['product']},id=#{x['name']}"
+      end
+    end
+
+    #args << "-daemonize"
+    args << "-monitor stdio"
+
+    "#{executable} #{args.join(' ')}"
+  end
+
+  # Create a QCOW2 image
+  #
+  # Arguments:
+  #   file:   location of the image
+  #   size:   size of the image (in GB)
+  def Qemu.create_disk(file, size)
+    puts "Create #{file} (Size: #{size}GB)"
+    cmd = "qemu-img create -q -f qcow2 #{file} #{size}G 2>&1"
+    result = `#{cmd}`
+    unless result
+      raise "ERROR: Could not create disk #{file} with size #{size}G.\nReturn: '#{result}'"  
+    end
+  end
+
+  def hostname
+    @guest_name.gsub(/\s/, "").downcase
+  end
+
+  def boot_disk_file
+    file = "#{File.expand_path(LOCAL_FOLDER)}/guests/#{hostname}/boot.qcow2"
+    unless File.exists? file
+      FileUtils.mkdir_p(File.dirname(file))
+      default_boot_file = []
+      default_boot_file << File.expand_path(USER_FOLDER)
+      default_boot_file << 'disks'
+      default_boot_file << 'ubuntu-22.04-server'
+      default_boot_file << 'amd64'
+      default_boot_file << 'ubuntu-22.04-server-amd64.qcow2'
+      FileUtils::cp(File.join(default_boot_file), file, verbose: true)
+    end
+
+    file
+  end
+
+  # Open QMP socket and process communication
+  #
+  # TODO: clean-up ugly non_blocking part
+  def Qemu.QMP_open(&block)
+    TCPSocket.open('localhost', 24444) do |qmp|
+      qmp_pipe = -> (cmd) {
+        qmp.print(cmd.to_json)
+        msg = ''
+        while true
+          begin
+            sleep 0.01
+            msg << qmp.read_nonblock(100)
+          rescue IO::EAGAINWaitReadable
+            break
+          end
+        end
+        msg
+      }
+      qmp_pipe.({execute: "qmp_capabilities"})
+      block.call(qmp_pipe)
+    end
+  end
+
+  def Qemu.change_vnc_password(new_password)
+    Qemu.QMP_open do |qmp|
+      qmp.({execute: 'change-vnc-password', arguments: {password: new_password}})
+    end
+  end
+
+  private
+
+  # Which architecture is supported by the accelerator?
+  #
+  # Return:
+  #   :x86      - accelerator for x86 guests
+  #   :arm64    - accelerator for AARCH64 guests
+  #   :none     - no accelerator available
+  def accelerator_support
+    result_x86 = `qemu-system-x86_64 -accel help 2>&1`
+    result_arm = `qemu-system-aarch64 -accel help 2>&1`
+    if result_x86.include? 'hvf'
+      :x86
+    elsif result_arm.include? 'hvf'
+      :arm64
+    else
+      :none
+    end
+  end
+end
+
+env = if File.exists? ENV_FILE
+  JSON.parse(File.read(ENV_FILE))
+else
+  {"guests" => []}
+end
+
+case ARGV[0]
+when 'up'
+  env['guests'].each do |guest|
+    guest[:vnc_id] = 11
+    guest[:qmp_port] = 24444
+    guest[:port_forward] = []
+    guest[:port_forward] << {host: 20022, guest: 22}
+    vm = Qemu.new(**guest.transform_keys(&:to_sym))
+    puts vm.cmd
+  end
+when 'down'
+  # TODO: implement shutdown of the VM
+when 'install'
+  arch = if ARGV[3] == 'arm64'
+    :arm64
+  else
+    :x86
+  end
+  vm = Qemu.new(image: ARGV[1], iso: ARGV[2], arch: arch)
+  puts vm.cmd
+when 'create'
+  Qemu.create_disk(ARGV[1], ARGV[2])
+when 'ssh'
+  `open ssh://susi@localhost:20022`
+when 'vnc'
+  Qemu.change_vnc_password('susi')
+  `open vnc://susi:susi@localhost:5911`
+else
+  puts <<HELP
+susi - QEMU-based VM manager for macOS
+
+Usage:
+
+  # show this help message
+  susi
+
+  # create a QCOW2 disk (e.g. file.qcow2 with 20GB)
+  susi create file.qcow2 20
+
+  # stop VM in current directory
+  susi down
+
+  # install a new machine
+  susi install file.qcow2 ubuntu.iso x86
+
+  # start VM in current directory
+  susi up
+
+Contact:
+
+  by Daniel Bovensiepen (oss [at] bovi [point] li)
+  at https://github.com/bovi/susi
+HELP
+end
