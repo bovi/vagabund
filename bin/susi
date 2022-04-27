@@ -4,10 +4,13 @@ require 'json'
 require 'securerandom'
 require 'fileutils'
 require 'socket'
+require 'open3'
 
 USER_FOLDER = "~/.susi"
 LOCAL_FOLDER = "./.susi"
 ENV_FILE = "susi.json"
+DEFAULT_USER = 'susi'
+DEFAULT_PASSWORD = 'susi'
 
 class Qemu
   def initialize(name: nil, arch: :x86, memory: 1024, image: nil, iso: nil,
@@ -124,14 +127,14 @@ class Qemu
       end
     end
 
-    args << "-daemonize"
-    #args << "-monitor stdio"
-
-    "#{executable} #{args.join(' ')}"
+    # redirect everything to /dev/null (we don't want to see anything)
+    "#{executable} #{args.join(' ')} 1> /dev/null 2> /dev/null"
   end
 
   def start
-    `#{cmd}`
+    # apparantly we can't fork or daemonize when we use USB
+    # TODO: we should figure out why and fix it, afterwards use -daemonize in QEMU
+    spawn cmd
   end
 
   # Create a QCOW2 image
@@ -246,6 +249,40 @@ class Qemu
   end
 end
 
+def usb
+  parse = -> (i) {
+    if i['vendor_id'] == 'apple_vendor_id'
+      vendor_name = "Apple"
+      vendor_id = nil
+    else
+      _tmp = i['vendor_id'].match(/([0-9a-z]*)\s*\((.*?)\)/)
+      _tmp = [] if _tmp.nil?
+      vendor_name = _tmp[2] || nil
+      vendor_id = _tmp[1] || nil
+    end
+    product_id = i['product_id'] || nil
+    {
+      name: i['_name'], 
+      vendor_name: vendor_name,
+      vendor_id: vendor_id,
+      product_id: product_id
+    }
+  }
+
+  out, err, status = Open3.capture3('system_profiler SPUSBDataType -json')
+  usb_devices = []
+  JSON.parse(out)['SPUSBDataType'].first['_items'].each do |dev|
+    usb_devices << parse.(dev)
+    if dev.has_key? '_items'
+      dev['_items'].each do |hub_item|
+        usb_devices << parse.(hub_item)
+      end
+    end
+  end
+
+  usb_devices
+end
+
 env = if File.exists? ENV_FILE
   JSON.parse(File.read(ENV_FILE))
 else
@@ -261,6 +298,8 @@ when 'up', 'start'
     guest[:port_forward] << {host: 20022, guest: 22}
     vm = Qemu.new(**guest.transform_keys(&:to_sym))
     vm.start
+    sleep 1
+    Qemu.change_vnc_password(DEFAULT_PASSWORD)
   end
 when 'down', 'shutdown', 'off'
   Qemu.shutdown
@@ -275,13 +314,49 @@ when 'install'
 when 'create'
   Qemu.create_disk(ARGV[1], ARGV[2])
 when 'ssh'
-  `open ssh://susi@localhost:20022`
+  `open ssh://#{DEFAULT_USER}@localhost:20022`
 when 'vnc'
-  Qemu.change_vnc_password('susi')
-  `open vnc://susi:susi@localhost:5911`
+  `open vnc://#{DEFAULT_USER}:#{DEFAULT_PASSWORD}@localhost:5911`
 when 'status'
   puts "VM Guest status: #{Qemu.status}"
-when 'init'
+when 'usb'
+  env_data = JSON.parse(File.open(ENV_FILE).read)
+  guest_name = env_data['guests'].first['name']
+  puts "Adding a USB device to the '#{guest_name}' VM"
+  puts
+  puts "Please ensure that the USB device(s) you want to add are not connected"
+  puts "...press ENTER to continue"
+  STDIN.gets("\n")
+  puts "Scanning..."
+  puts
+  scan_1 = usb
+  puts "Please insert the USB device(s) you want to add"
+  puts "...press ENTER to continue"
+  STDIN.gets("\n")
+  puts "Scanning..."
+  puts
+  scan_2 = usb
+
+  # identify the new USB devices
+  new_devices = (scan_2 - scan_1)
+  # add the new USB devices to the VM configuration file
+  new_devices.each do |dev|
+    n = dev[:name]
+    v = dev[:vendor_name]
+    puts "Adding '#{n}' from '#{v}' to the '#{guest_name}' VM"
+    puts "...press ENTER to permanent add it to your configuration (CTRL-C to cancel)"
+    STDIN.gets("\n")
+
+    # TODO: currently we assume just one machine, probably we should offer selection
+    env_data['guests'].first['usb'] = [] if env_data['guests'].first['usb'].nil?
+    env_data['guests'].first['usb'] << {
+      name: n.gsub(/[^a-zA-Z0-9]/, ''),
+      vendor: dev[:vendor_id],
+      product: dev[:product_id]
+    }
+  end
+  File.open(ENV_FILE, 'w+').puts(env_data.to_json)
+when 'init', 'new'
   if File.exist? ENV_FILE
     puts 'Already initialized'
   else
@@ -317,6 +392,9 @@ Usage:
 
   # start VM in current directory
   susi up
+
+  # wizard to add USB devices to the VM configuration
+  susi usb
 
   # start VNC session for the current VM
   susi vnc
