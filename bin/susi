@@ -124,10 +124,14 @@ class Qemu
       end
     end
 
-    #args << "-daemonize"
-    args << "-monitor stdio"
+    args << "-daemonize"
+    #args << "-monitor stdio"
 
     "#{executable} #{args.join(' ')}"
+  end
+
+  def start
+    `#{cmd}`
   end
 
   # Create a QCOW2 image
@@ -177,28 +181,47 @@ class Qemu
   #
   # TODO: clean-up ugly non_blocking part
   def Qemu.QMP_open(&block)
-    TCPSocket.open('localhost', 24444) do |qmp|
-      qmp_pipe = -> (cmd) {
-        qmp.print(cmd.to_json)
-        msg = ''
-        while true
-          begin
-            sleep 0.01
-            msg << qmp.read_nonblock(100)
-          rescue IO::EAGAINWaitReadable
-            break
+    begin
+      TCPSocket.open('localhost', 24444) do |qmp|
+        qmp_pipe = -> (cmd) {
+          qmp.print(cmd.to_json)
+          msg = ''
+          while true
+            begin
+              sleep 0.01
+              msg << qmp.read_nonblock(100)
+            rescue IO::EAGAINWaitReadable
+              break
+            end
           end
-        end
-        msg
-      }
-      qmp_pipe.({execute: "qmp_capabilities"})
-      block.call(qmp_pipe)
+          msg
+        }
+        qmp_pipe.({execute: "qmp_capabilities"})
+        block.call(qmp_pipe)
+      end
+    rescue Errno::ECONNREFUSED
+      false
     end
   end
 
+  def Qemu.QMP_single_cmd(cmd)
+    Qemu.QMP_open { |qmp| qmp.(cmd) }
+  end
+
   def Qemu.change_vnc_password(new_password)
-    Qemu.QMP_open do |qmp|
-      qmp.({execute: 'change-vnc-password', arguments: {password: new_password}})
+    Qemu.QMP_single_cmd({execute: 'change-vnc-password', arguments: {password: new_password}})
+  end
+
+  def Qemu.shutdown
+    Qemu.QMP_single_cmd({execute: "system_powerdown"})
+  end
+
+  def Qemu.status
+    state = Qemu.QMP_single_cmd({execute: "query-status"})
+    if state
+      JSON.parse(state)["return"]["status"]
+    else
+      "halt"
     end
   end
 
@@ -230,17 +253,17 @@ else
 end
 
 case ARGV[0]
-when 'up'
+when 'up', 'start'
   env['guests'].each do |guest|
     guest[:vnc_id] = 11
     guest[:qmp_port] = 24444
     guest[:port_forward] = []
     guest[:port_forward] << {host: 20022, guest: 22}
     vm = Qemu.new(**guest.transform_keys(&:to_sym))
-    puts vm.cmd
+    vm.start
   end
-when 'down'
-  # TODO: implement shutdown of the VM
+when 'down', 'shutdown', 'off'
+  Qemu.shutdown
 when 'install'
   arch = if ARGV[3] == 'arm64'
     :arm64
@@ -256,6 +279,18 @@ when 'ssh'
 when 'vnc'
   Qemu.change_vnc_password('susi')
   `open vnc://susi:susi@localhost:5911`
+when 'status'
+  puts "VM Guest status: #{Qemu.status}"
+when 'init'
+  if File.exist? ENV_FILE
+    puts 'Already initialized'
+  else
+    File.open(ENV_FILE, 'w+') do |f|
+      init_data = { guests: [{name: 'Test Machine'}] }.to_json
+      f.puts init_data
+    end
+    puts "Created #{ENV_FILE}" 
+  end
 else
   puts <<HELP
 susi - QEMU-based VM manager for macOS
@@ -270,6 +305,9 @@ Usage:
 
   # stop VM in current directory
   susi down
+
+  # initialize VM environment
+  susi init
 
   # install a new machine
   susi install file.qcow2 ubuntu.iso x86
