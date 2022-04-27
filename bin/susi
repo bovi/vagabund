@@ -15,7 +15,7 @@ DEFAULT_PASSWORD = 'susi'
 class Qemu
   def initialize(name: nil, arch: :x86, memory: 1024, image: nil, iso: nil,
                  network_card: 'virtio-net-pci', port_forward: nil,
-                 headless: true, usb: nil, vnc_id: nil, qmp_port: nil)
+                 usb: nil, vnc_id: nil, qmp_port: nil)
     @guest_name = if name.nil?
       SecureRandom.uuid
     else
@@ -30,7 +30,6 @@ class Qemu
     @iso = iso
     @network_card = network_card
     @port_forward = port_forward || []
-    @headless = headless
     @usb = usb
     @vnc_id = vnc_id
     @qmp_port = qmp_port
@@ -98,17 +97,7 @@ class Qemu
       args << "-netdev user,id=net0#{hostfwd}"
     end
 
-    # add video graphic card support (headless or not?)
-    if @headless
-      #args << "-vga none"
-      #args << "-nographic"
-    else
-      args << "-vga virtio"
-      args << "-display default,show-cursor=on"
-      args << "-device usb-tablet,bus=xhci.0"
-    end
-
-    # activate VNC
+    # enable VNC
     args << "-vnc localhost:#{@vnc_id},password=on" unless @vnc_id.nil?
 
     unless @qmp_port.nil?
@@ -117,11 +106,15 @@ class Qemu
       args << "-mon chardev=mon0,mode=control,pretty=on"
     end
 
+    # configurate screen and devices
+    args << "-vga virtio"
+    args << "-display default,show-cursor=on"
+
     # enable USB
-    #
-    # TODO: debug this part, it seems when I put this before the hostfwd it has a conflict
+    args << "-device qemu-xhci,id=xhci"
+    args << "-device usb-tablet"
+
     unless @usb.nil?
-      args << "-device qemu-xhci,id=xhci"
       @usb.each do |x|
         args << "-device usb-host,vendorid=#{x['vendor']},productid=#{x['product']},id=#{x['name']}"
       end
@@ -297,6 +290,7 @@ when 'up', 'start'
     guest[:port_forward] = []
     guest[:port_forward] << {host: 20022, guest: 22}
     vm = Qemu.new(**guest.transform_keys(&:to_sym))
+    puts vm.cmd if ARGV[1] == 'verbose'
     vm.start
     sleep 1
     Qemu.change_vnc_password(DEFAULT_PASSWORD)
