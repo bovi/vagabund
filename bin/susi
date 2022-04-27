@@ -312,8 +312,14 @@ Usage:
   # install a new machine
   susi install file.qcow2 ubuntu.iso x86
 
+  # start SSH session for the current VM
+  susi ssh
+
   # start VM in current directory
   susi up
+
+  # start VNC session for the current VM
+  susi vnc
 
 Contact:
 
