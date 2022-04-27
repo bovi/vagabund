@@ -191,7 +191,10 @@ class Qemu
         end
         msg
       }
+
+      # leaving capabilities negotiation and enter command mode
       qmp_pipe.({execute: "qmp_capabilities"})
+
       block.call(qmp_pipe)
     end
   end
@@ -274,8 +277,14 @@ Usage:
   # install a new machine
   susi install file.qcow2 ubuntu.iso x86
 
+  # start SSH session for the current VM
+  susi ssh
+
   # start VM in current directory
   susi up
+
+  # start VNC session for the current VM
+  susi vnc
 
 Contact:
 
