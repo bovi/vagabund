@@ -13,9 +13,9 @@ DEFAULT_USER = 'susi'
 DEFAULT_PASSWORD = 'susi'
 
 class Qemu
-  def initialize(name: nil, arch: :x86, memory: 1024, image: nil, iso: nil,
+  def initialize(name: nil, arch: nil, memory: 1024, base: false, iso: nil,
                  network_card: 'virtio-net-pci', port_forward: nil,
-                 usb: nil, vnc_id: nil, qmp_port: nil)
+                 usb: nil, vnc_id: nil, qmp_port: nil, disk_size: 40)
     @guest_name = if name.nil?
       SecureRandom.uuid
     else
@@ -24,15 +24,16 @@ class Qemu
       end
       name
     end
-    @arch = arch
+    @arch = arch || accelerator_support
     @memory = memory
-    @image = image
+    @base = base
     @iso = iso
     @network_card = network_card
     @port_forward = port_forward || []
     @usb = usb
     @vnc_id = vnc_id
     @qmp_port = qmp_port
+    @disk_size = disk_size
   end
 
   def cmd
@@ -53,12 +54,14 @@ class Qemu
     when :x86
       'q35'
     when :arm64
-      'virt'
+      'virt,highmem=off'
     end
     args << "-machine type=#{machine}"
 
     if @arch == :arm64
-      args << "-cpu cortex-a72"
+      args << "-cpu cortex-a57"
+      args << "-device intel-hda"
+      args << "-device hda-output"
     end
 
     # use accelerator if the architecture is correct
@@ -68,12 +71,24 @@ class Qemu
     args << "-m #{@memory}"
 
     # add boot drive
+    file = if @base
+      # create base image if it doesn't yet exist
+      unless File.exist? default_boot_disk_file
+        FileUtils.mkdir_p(File.dirname(default_boot_disk_file))
+        Qemu.create_disk(default_boot_disk_file, @disk_size)
+      end
+      default_boot_disk_file
+    else
+      boot_disk_file
+    end
     if @arch == :arm64
-      #args << "-device virtio-blk-pci,drive=drv0"
-      #args << "-drive format=qcow2,file=#{@image},if=none,id=drv0"
-      #args << "-bios #{File.expand_path(USER_FOLDER)}/arm64/edk2-aarch64-code.fd"
+      edk = "#{File.expand_path(USER_FOLDER)}/arm64/edk2-aarch64-code.fd"
+      ovmf = "#{File.expand_path(USER_FOLDER)}/arm64/edk2-arm-vars.fd"
+      args << "-drive if=pflash,format=raw,file=#{edk},readonly=on"
+      args << "-drive if=pflash,format=raw,file=#{ovmf},discard=on"
+      args << "-drive if=virtio,format=qcow2,file=#{file},discard=on"
     elsif @arch == :x86
-      args << "-drive file=#{boot_disk_file},if=virtio"
+      args << "-drive file=#{file},if=virtio"
     else
       raise 'Could not add drive for this architecture'
     end
@@ -81,13 +96,7 @@ class Qemu
     # add CDROM
     unless @iso.nil?
       raise "No valid iso image given: '#{@iso}'" unless File.exists? @iso.to_s
-      #if @arch == :arm64
-      #  args << "-device virtio-scsi"
-      #  args << "-device scsi-cd,drive=cd"
-      #  args << "-drive if=none,id=cd,format=raw,file=#{@iso}"
-      #else
-        args << "-cdrom #{@iso}"
-      #end
+      args << "-cdrom #{@iso}"
     end
 
     # add network capability
@@ -107,12 +116,26 @@ class Qemu
     end
 
     # configurate screen and devices
-    args << "-vga virtio"
-    args << "-display default,show-cursor=on"
+    case @arch
+    when :arm64
+      args << '-vga none -device ramfb'
+    when :x86
+      args << "-vga virtio"
+      args << "-display default,show-cursor=on"
+    else
+      raise 'Could not add video for this architecture'
+    end
 
     # enable USB
     args << "-device qemu-xhci,id=xhci"
-    args << "-device usb-tablet"
+    case @arch
+    when :x86
+      args << "-device usb-tablet"
+    when :arm64
+      args << '-device usb-kbd'
+      args << '-device usb-mouse'
+      args << '-usb'
+    end
 
     unless @usb.nil?
       @usb.each do |x|
@@ -157,17 +180,25 @@ class Qemu
     @guest_name.gsub(/\s/, "").downcase
   end
 
+  def default_boot_disk_file
+    default_boot_file = []
+    default_boot_file << File.expand_path(USER_FOLDER)
+    default_boot_file << 'disks'
+    default_boot_file << 'ubuntu-22.04-server'
+    default_boot_file << @arch.to_s
+    default_boot_file << "ubuntu-22.04-server-#{@arch}.qcow2"
+
+    File.join(default_boot_file)
+  end
+
   def boot_disk_file
     file = "#{File.expand_path(LOCAL_FOLDER)}/guests/#{hostname}/boot.qcow2"
     unless File.exists? file
       FileUtils.mkdir_p(File.dirname(file))
-      default_boot_file = []
-      default_boot_file << File.expand_path(USER_FOLDER)
-      default_boot_file << 'disks'
-      default_boot_file << 'ubuntu-22.04-server'
-      default_boot_file << 'amd64'
-      default_boot_file << 'ubuntu-22.04-server-amd64.qcow2'
-      Qemu.link_disk(file, File.join(default_boot_file))
+      unless File.exist? default_boot_disk_file
+        raise "Default boot image doesn't exist\n\t#{default_boot_disk_file}"
+      end
+      Qemu.link_disk(file, default_boot_disk_file)
     end
 
     file
@@ -197,6 +228,8 @@ class Qemu
       end
     rescue Errno::ECONNREFUSED
       false
+    rescue EOFError
+      false
     end
   end
 
@@ -210,6 +243,10 @@ class Qemu
 
   def Qemu.shutdown
     Qemu.QMP_single_cmd({execute: "system_powerdown"})
+  end
+
+  def Qemu.quit
+    Qemu.QMP_single_cmd({execute: "quit"})
   end
 
   def Qemu.status
@@ -297,19 +334,27 @@ when 'up', 'start'
   end
 when 'down', 'shutdown', 'off'
   Qemu.shutdown
+when 'quit'
+  Qemu.quit
 when 'install'
   arch = if ARGV[3] == 'arm64'
     :arm64
-  else
+  elsif ARGV[4] == 'x86'
     :x86
+  else
+    nil
   end
-  vm = Qemu.new(image: ARGV[1], iso: ARGV[2], arch: arch)
-  puts vm.cmd
+  vm = Qemu.new(iso: ARGV[1], arch: arch, base: true, vnc_id: 11, qmp_port: 24444)
+  puts vm.cmd if ARGV[2] == 'verbose'
+  vm.start
+  sleep 1
+  Qemu.change_vnc_password(DEFAULT_PASSWORD)
 when 'create'
   Qemu.create_disk(ARGV[1], ARGV[2])
 when 'ssh'
   `open ssh://#{DEFAULT_USER}@localhost:20022`
 when 'vnc'
+  Qemu.change_vnc_password(DEFAULT_PASSWORD)
   `open vnc://#{DEFAULT_USER}:#{DEFAULT_PASSWORD}@localhost:5911`
 when 'status'
   puts "VM Guest status: #{Qemu.status}"
@@ -379,7 +424,7 @@ Usage:
   susi init
 
   # install a new machine
-  susi install file.qcow2 ubuntu.iso x86
+  susi install ubuntu.iso x86
 
   # start SSH session for the current VM
   susi ssh
