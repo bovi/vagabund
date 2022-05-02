@@ -104,6 +104,8 @@ class Susi
                 puts "Deploy SSH keys"
                 logit.("Create .ssh folder")
                 ssh.exec!("sudo mkdir /home/#{local_user}/.ssh")
+                ssh_copy.(ssh, "~/.ssh/known_hosts", "/home/#{local_user}/.ssh/known_hosts")
+                ssh_copy.(ssh, "~/.ssh/config", "/home/#{local_user}/.ssh/config")
                 local_ssh_dir = File.expand_path("~/.ssh")
                 Dir.foreach(local_ssh_dir) do |f|
                   if f =~ /\.pub$/
