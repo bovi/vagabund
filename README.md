@@ -15,6 +15,22 @@ hand. The following things need to be considered during installation:
 
 - create user ```susi``` with password ```susi```
 - install OpenSSH Server
+- add ```susi ALL=(ALL) NOPASSWD: ALL``` to the sudoers file
+
+### Modify template
+
+To modify an existing template you can type:
+
+```susi modify --base=u2004server```
+
+Where ```u2004server``` is the template you want to modify. You can access
+the guest by typing:
+
+```susi ssh --base=u2004server```
+
+or
+
+```susi vnc --base=u2004server```
 
 ### Work with VM
 

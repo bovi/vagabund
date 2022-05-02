@@ -3,6 +3,8 @@
 require 'json'
 require 'fileutils'
 require 'net/http'
+require 'net/ssh'
+require 'net/scp'
 require_relative 'guest'
 require_relative 'susioptparser'
 
@@ -41,27 +43,128 @@ class Susi
         end
         base_disk = File.join(USER_DISK_FOLDER, base_disk)
         raise "Base image doesn't exist" unless File.exist? base_disk
-        vm = Guest.new(name: vm['name'], guest_id: guest_id, disk: disk, base_disk: base_disk,
+        guest = Guest.new(name: vm['name'], guest_id: guest_id, disk: disk, base_disk: base_disk,
                        usb: vm['usb'],
                        verbose: options.verbose, dryrun: options.dryrun)
-        vm.start
+        guest.start
+
+        puts "Waiting until Guest is booted..."
+        sleep 15
+        puts "Try to connect to the guest..."
+        10.times do |x|
+          begin
+            Net::SSH.start('localhost', 'susi', {password: "susi", port: guest.ssh_port}) do |ssh|
+              puts "Guest is up!"
+
+              hostname = ssh.exec!("hostname").strip
+              if hostname == 'u2004server'
+
+                puts "Set Hostname"
+                puts "Hostname: #{hostname}" if options.verbose
+                puts "Change hostname to: #{vm['name']}" if options.verbose
+                ssh.exec!("sudo hostnamectl set-hostname #{vm['name']}")
+                hostname = ssh.exec!("hostname").strip
+                puts "Hostname is now: #{hostname}" if options.verbose
+
+                puts "Install additional packages"
+                ssh.exec!("sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq zsh vim < /dev/null > /dev/null")
+
+                puts "Create local user and environment in guest"
+                local_user = `whoami`.strip
+                local_user_id = `echo $UID`.strip
+                ssh.exec!("sudo groupmod -g 20 staff")
+                ssh.exec!("sudo useradd -u #{local_user_id} #{local_user}")
+                ssh.exec!("sudo usermod -g staff #{local_user}")
+                ssh.exec!("sudo mkdir /home/#{local_user}")
+                # setup ZSH
+                ssh.exec!("sudo usermod -s /bin/zsh #{local_user}")
+                ssh.scp.upload(File.expand_path('~/.zshrc'), "/tmp/.zshrc")
+                ssh.exec!("sudo mv /tmp/.zshrc /home/#{local_user}/.zshrc")
+                ssh.exec!("echo \"#{local_user} ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee -a /etc/sudoers")
+
+                puts "Deploy SSH keys"
+                puts "Create .ssh folder" if options.verbose
+                ssh.exec!("sudo mkdir /home/#{local_user}/.ssh")
+                local_ssh_dir = File.expand_path("~/.ssh")
+                Dir.foreach(local_ssh_dir) do |f|
+                  if f =~ /\.pub$/
+                    k = File.read(File.join(local_ssh_dir, f)).strip
+                    puts "Add public key '#{f}' to the guest" if options.verbose
+                    ssh.exec!("sudo sh -c 'echo \"#{k}\" >> /home/#{local_user}/.ssh/authorized_keys'")
+                  elsif f == 'id_ed25519'
+                    k = File.read(File.join(local_ssh_dir, f)).strip
+                    puts "Add private key '#{f}' to the guest" if options.verbose
+                    ssh.exec!("sudo sh -c 'echo \"#{k}\" >> /home/#{local_user}/.ssh/#{f}'")
+                    ssh.exec!("sudo chmod 0600 /home/#{local_user}/.ssh/#{f}")
+                  end
+                end
+
+                puts "Setup mounted directories"
+                ssh.exec!("sudo mkdir /home/#{local_user}/cwd")
+                fstab_entry = "CWD /home/#{local_user}/cwd 9p _netdev,trans=virtio,version=9p2000.u,msize=104857600 0 0"
+                ssh.exec!("sudo sh -c 'echo \"#{fstab_entry}\" >> /etc/fstab'")
+                ssh.exec!("sudo mount /home/#{local_user}/cwd")
+
+                ssh.exec!("sudo chown -hR #{local_user}:staff /home/#{local_user}")
+              else
+                raise "Hostname is invalid: #{hostname.inspect}"
+              end
+            end
+
+            break
+          rescue Errno::ECONNRESET
+            # host is still not available
+            puts "Guest '#{vm['name']}' not yet up... (#{x}/10)"
+            sleep 5
+          end
+        end
+      end
+    when 'list'
+      Dir.foreach(USER_DISK_FOLDER) do |e|
+        next unless e =~ /qcow2$/
+        puts e.gsub('.qcow2', '')
       end
 
     when 'vnc'
-      Guest.new(guest_id: 1).connect_vnc
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      Guest.new(guest_id: guest_id).connect_vnc
 
     when 'ssh'
-      Guest.new(guest_id: 1).connect_ssh
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      Guest.new(guest_id: guest_id).connect_ssh
 
     when 'quit'
-      Guest.new(guest_id: 1).quit!
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      Guest.new(guest_id: guest_id).quit!
 
     when 'status'
-      puts Guest.new(guest_id: 1).status
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      puts Guest.new(guest_id: guest_id).status
 
     # shutdown guest(s) from the current environment
     when 'down', 'shutdown'
-      Guest.new(guest_id: 1).shutdown!
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      Guest.new(guest_id: guest_id).shutdown!
 
     when 'usb'
       vm = if ARGV[1]
@@ -70,6 +173,24 @@ class Susi
         Guest.new(guest_id: 1)
       end
       vm.add_usb(ENV_FILE)
+
+    when 'modify'
+      raise 'No base defined' if options.base.nil?
+      disk = File.join(USER_DISK_FOLDER, "#{options.base}.qcow2")
+      vm = Guest.new(guest_id: 99, disk: disk, verbose: options.verbose, dryrun: options.dryrun, install: true)
+      vm.start
+      vm.connect_vnc
+
+    when 'destroy'
+      guest_id = if options.base.nil?
+        1
+      else
+        99
+      end
+      puts "Shutdown Guest"
+      Guest.new(guest_id: guest_id).quit!
+      sleep 2
+      FileUtils.rm_rf(ENV_FOLDER, verbose: true)
 
     else
       case options.action

@@ -111,6 +111,10 @@ class Qemu
     args << "-chardev socket,id=mon0,host=localhost,port=#{@qmp_port},server=on,wait=off"
     args << "-mon chardev=mon0,mode=control,pretty=on"
 
+    # File access
+    ## add current working directory to the system
+    args << " -virtfs local,path=#{File.expand_path('.')},security_model=mapped-xattr,mount_tag=CWD"
+
     "#{cmd} #{args.join(' ')} 1> /dev/null 2> /dev/null"
   end
 

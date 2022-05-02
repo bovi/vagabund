@@ -10,6 +10,7 @@ class SusiOptParser
     def initialize
       self.verbose = false
       self.dryrun = false
+      self.base = nil
     end
 
     def define_options(parser)

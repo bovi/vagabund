@@ -46,6 +46,10 @@ class Guest
                            iso: @iso, usb: @usb)
   end
 
+  def ssh_port
+    @qemu_guest.ssh_port
+  end
+
   def quit!
     @qemu_guest.quit!
   end
@@ -59,7 +63,7 @@ class Guest
   end
 
   def connect_ssh
-    cmd = "open ssh://susi@localhost:#{@qemu_guest.ssh_port}"
+    cmd = "open ssh://localhost:#{ssh_port}"
 
     if @dryrun
       puts cmd
@@ -86,6 +90,7 @@ class Guest
     unless @dryrun
       spawn(@qemu_guest.cmd)
       sleep 3
+      puts "Activate VNC" if @verbose
       @qemu_guest.change_vnc_password('susi')
     end
   end
