@@ -60,6 +60,10 @@ After you are finished the guest can be shutdown by typing:
 
 ```susi down```
 
+The machine can be deleted with:
+
+```susi destroy```
+
 ### Adding USB devices to the VM
 
 ```susi``` comes with an USB wizard which helps to add USB devices to the
