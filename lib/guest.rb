@@ -137,7 +137,7 @@ class Guest
         product: dev[:product_id]
       }
     end
-    File.open(env_file, 'w+').puts(env_data.to_json)
+    File.open(env_file, 'w+').puts(JSON.pretty_generate(env_data))
   end
 
   # scan the USB system and return all USB devices

@@ -15,8 +15,10 @@ class Susi
   USER_MISC_FOLDER = File.join(USER_FOLDER, 'miscs')
   ENV_FILE = 'susi.json'
   ENV_FOLDER = File.expand_path(".susi")
+  DEFAULT_BASE_IMG = 'u2004server'
 
   def Susi.execute_action(argv, options)
+    logit = -> (msg) { puts msg if options.verbose }
     case ARGV[0]
 
     # start guest(s) from the current environment
@@ -34,9 +36,16 @@ class Susi
         guest_id =+ 1
         Susi.init_local_machine_folder(name: vm['name'])
         disk = File.join(ENV_FOLDER, 'machines', vm['name'], 'boot.qcow2')
+
+        qemu_processes_with_disk = `ps awxx | grep qemu`.strip.lines.count {|x|x.match /#{disk}/}
+        if qemu_processes_with_disk > 0
+          puts "Guest '#{vm['name']}' is already running"
+          exit
+        end
+
         base_disk = if vm['base'].nil?
           # no base image defined, using the default
-          'u2004server.qcow2'
+          "#{DEFAULT_BASE_IMG}.qcow2"
         else
           # base image defined
           "#{vm['base']}.qcow2"
@@ -49,22 +58,21 @@ class Susi
         guest.start
 
         puts "Waiting until Guest is booted..."
-        sleep 15
-        puts "Try to connect to the guest..."
-        10.times do |x|
+        how_many_tries = 60
+        how_many_tries.times do |x|
           begin
-            Net::SSH.start('localhost', 'susi', {password: "susi", port: guest.ssh_port}) do |ssh|
+            Net::SSH.start('localhost', 'susi', {password: "susi", port: guest.ssh_port, timeout: 1}) do |ssh|
               puts "Guest is up!"
 
               hostname = ssh.exec!("hostname").strip
-              if hostname == 'u2004server'
+              if hostname == DEFAULT_BASE_IMG
 
                 puts "Set Hostname"
-                puts "Hostname: #{hostname}" if options.verbose
-                puts "Change hostname to: #{vm['name']}" if options.verbose
+                logit.("Hostname: #{hostname}")
+                logit.("Change hostname to: #{vm['name']}")
                 ssh.exec!("sudo hostnamectl set-hostname #{vm['name']}")
                 hostname = ssh.exec!("hostname").strip
-                puts "Hostname is now: #{hostname}" if options.verbose
+                logit.("Hostname is now: #{hostname}")
 
                 puts "Install additional packages"
                 ssh.exec!("sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq zsh vim < /dev/null > /dev/null")
@@ -78,23 +86,32 @@ class Susi
                 ssh.exec!("sudo mkdir /home/#{local_user}")
                 # setup ZSH
                 ssh.exec!("sudo usermod -s /bin/zsh #{local_user}")
-                ssh.scp.upload(File.expand_path('~/.zshrc'), "/tmp/.zshrc")
-                ssh.exec!("sudo mv /tmp/.zshrc /home/#{local_user}/.zshrc")
-                ssh.exec!("echo \"#{local_user} ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee -a /etc/sudoers")
+
+                ssh_copy = -> (ssh_server, source, target) do
+                  full_file_path = File.expand_path(source)
+                  if File.exist? full_file_path
+                    logit.("Upload #{source}...")
+                    tmp_file_name = "/tmp/#{File.basename(target)}"
+                    ssh_server.scp.upload(full_file_path, tmp_file_name)
+                    ssh_server.exec!("sudo mv #{tmp_file_name} #{target}")
+                  end
+                end
+
+                ssh_copy.(ssh, '~/.zshrc', "/home/#{local_user}/.zshrc")
+                ssh_copy.(ssh, '~/.vimrc', "/home/#{local_user}/.vimrc")
+                ssh_copy.(ssh, '~/.gitconfig', "/home/#{local_user}/.gitconfig")
 
                 puts "Deploy SSH keys"
-                puts "Create .ssh folder" if options.verbose
+                logit.("Create .ssh folder")
                 ssh.exec!("sudo mkdir /home/#{local_user}/.ssh")
                 local_ssh_dir = File.expand_path("~/.ssh")
                 Dir.foreach(local_ssh_dir) do |f|
                   if f =~ /\.pub$/
                     k = File.read(File.join(local_ssh_dir, f)).strip
-                    puts "Add public key '#{f}' to the guest" if options.verbose
+                    logit.("Add public key '#{f}' to the guest")
                     ssh.exec!("sudo sh -c 'echo \"#{k}\" >> /home/#{local_user}/.ssh/authorized_keys'")
                   elsif f == 'id_ed25519'
-                    k = File.read(File.join(local_ssh_dir, f)).strip
-                    puts "Add private key '#{f}' to the guest" if options.verbose
-                    ssh.exec!("sudo sh -c 'echo \"#{k}\" >> /home/#{local_user}/.ssh/#{f}'")
+                    ssh_copy.(ssh, "~/.ssh/#{f}", "/home/#{local_user}/.ssh/#{f}")
                     ssh.exec!("sudo chmod 0600 /home/#{local_user}/.ssh/#{f}")
                   end
                 end
@@ -105,17 +122,23 @@ class Susi
                 ssh.exec!("sudo sh -c 'echo \"#{fstab_entry}\" >> /etc/fstab'")
                 ssh.exec!("sudo mount /home/#{local_user}/cwd")
 
+                # finalize permissions of the user
+                ssh.exec!("echo \"#{local_user} ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee -a /etc/sudoers")
                 ssh.exec!("sudo chown -hR #{local_user}:staff /home/#{local_user}")
               else
-                raise "Hostname is invalid: #{hostname.inspect}"
+                puts "Guets already deployed"
               end
             end
 
             break
-          rescue Errno::ECONNRESET
+          rescue Errno::ECONNRESET, Net::SSH::ConnectionTimeout
             # host is still not available
-            puts "Guest '#{vm['name']}' not yet up... (#{x}/10)"
-            sleep 5
+            if x > 5
+              puts "Guest '#{vm['name']}' not yet up... (#{x+1}/#{how_many_tries})"
+            elsif x >= 999
+              raise "Couldn't connect to guest host"
+            end
+            sleep 1
           end
         end
       end
@@ -189,8 +212,12 @@ class Susi
       end
       puts "Shutdown Guest"
       Guest.new(guest_id: guest_id).quit!
-      sleep 2
-      FileUtils.rm_rf(ENV_FOLDER, verbose: true)
+      loop do
+        ret = `ps awxx | grep qemu`.strip
+        break if ret.lines.count <= 2
+        sleep 0.1
+      end
+      FileUtils.rm_rf(ENV_FOLDER, verbose: options.verbose)
 
     else
       case options.action
@@ -201,7 +228,7 @@ class Susi
           puts 'Environment already initialized'
         else
           options.machines.map {|x| {name: x}}
-          init_data = { guests: options.machines.map { |x| { name: x } } }.to_json
+          init_data = JSON.pretty_generate({ guests: options.machines.map { |x| { name: x } } })
           File.open(ENV_FILE, 'w+') do |f|
             f.puts init_data
           end
