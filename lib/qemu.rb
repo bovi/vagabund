@@ -61,13 +61,14 @@ class Qemu
     end
 
     # add disk
+    args << "-drive if=virtio,format=qcow2,file=#{@disk},discard=on"
     case @arch
     when 'x86_64'
-      args << "-drive if=virtio,file=#{@disk}"
+      # nothing else todo
     when 'arm64'
+      # add firmware for the ARM platform
       args << "-drive if=pflash,format=raw,file=#{@edk},readonly=on"
       args << "-drive if=pflash,format=raw,file=#{@edk_vars},discard=on"
-      args << "-drive if=virtio,format=qcow2,file=#{@disk},discard=on"
     end
 
     # graphical interface

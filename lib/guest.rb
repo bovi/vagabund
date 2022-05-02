@@ -42,7 +42,8 @@ class Guest
       end
     end
 
-    @qemu_guest = Qemu.new(vm_id: @guest_id, arch: @arch, disk: @disk, iso: @iso, usb: @usb)
+    @qemu_guest = Qemu.new(vm_id: @guest_id, arch: @arch, disk: @disk,
+                           iso: @iso, usb: @usb)
   end
 
   def quit!
@@ -155,7 +156,8 @@ class Guest
       }
     }
 
-    out, err, status = Open3.capture3('system_profiler SPUSBDataType -json')
+    usb_cmd = 'system_profiler SPUSBDataType -json'
+    out, err, status = Open3.capture3(usb_cmd)
     usb_devices = []
     JSON.parse(out)['SPUSBDataType'].first['_items'].each do |dev|
       usb_devices << parse.(dev)
