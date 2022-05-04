@@ -66,6 +66,15 @@ class Susi
 
               hostname = ssh.exec!("hostname").strip
               if hostname == DEFAULT_BASE_IMG
+                ssh_copy = -> (ssh_server, source, target) do
+                  full_file_path = File.expand_path(source)
+                  if File.exist? full_file_path
+                    logit.("Upload #{source}...")
+                    tmp_file_name = "/tmp/#{File.basename(target)}"
+                    ssh_server.scp.upload(full_file_path, tmp_file_name)
+                    ssh_server.exec!("sudo mv #{tmp_file_name} #{target}")
+                  end
+                end
 
                 puts "Set Hostname"
                 logit.("Hostname: #{hostname}")
@@ -73,6 +82,11 @@ class Susi
                 ssh.exec!("sudo hostnamectl set-hostname #{vm['name']}")
                 hostname = ssh.exec!("hostname").strip
                 logit.("Hostname is now: #{hostname}")
+
+                # set time-zone
+                tz = `readlink /etc/localtime`.strip.split('/')[-2..-1].join('/')
+                logit.("Set Timezone to: #{tz}")
+                ssh.exec!("sudo timedatectl set-timezone \"#{tz}\"")
 
                 puts "Install additional packages"
                 ssh.exec!("sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq zsh vim < /dev/null > /dev/null")
@@ -86,18 +100,11 @@ class Susi
                 ssh.exec!("sudo mkdir /home/#{local_user}")
                 # setup ZSH
                 ssh.exec!("sudo usermod -s /bin/zsh #{local_user}")
-
-                ssh_copy = -> (ssh_server, source, target) do
-                  full_file_path = File.expand_path(source)
-                  if File.exist? full_file_path
-                    logit.("Upload #{source}...")
-                    tmp_file_name = "/tmp/#{File.basename(target)}"
-                    ssh_server.scp.upload(full_file_path, tmp_file_name)
-                    ssh_server.exec!("sudo mv #{tmp_file_name} #{target}")
-                  end
-                end
-
                 ssh_copy.(ssh, '~/.zshrc', "/home/#{local_user}/.zshrc")
+                ssh.exec!("sudo touch ~/.zsh_history")
+                ssh.exec!("sudo chmod 0600 ~/.zsh_history")
+
+
                 ssh_copy.(ssh, '~/.vimrc', "/home/#{local_user}/.vimrc")
                 ssh_copy.(ssh, '~/.gitconfig', "/home/#{local_user}/.gitconfig")
 
