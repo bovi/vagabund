@@ -164,12 +164,50 @@ class Qemu
   end
 
   def status
-    state = qmp_single_cmd({execute: "query-status"})
-    if state
-      JSON.parse(state)["return"]["status"]
-    else
-      "halt"
+    state = ''
+    processes = running_qemu_processes
+    processes.each do |ps|
+      state << "#{ps[:name]}: #{ps[:status]} (#{ps[:path]})"
     end
+
+    state
+  end
+
+  def running_qemu_processes
+    processes = []
+    ps_awxx = `ps awxx | grep "qemu-system"`
+    ps_awxx.each_line do |ps_with_qemu|
+      next unless ps_with_qemu =~ /sh -c qemu-system/
+      ps_with_qemu.strip.match(/(qemu-system-.*)$/)[1].split(/\s\-/).each do |param|
+        case param
+        when /drive\s/
+          f = param.match(/file\=(.*+)/)
+          path = ""
+          unless f.nil?
+            f_split = f[1].split('/')
+            f_split.each do |x|
+              if x == ".susi"
+                vm_file = File.join(path, "susi.json")
+                if File.exist? vm_file
+                  vm_data = JSON.parse(File.read(vm_file))
+                  vm_data["guests"].each do |vm|
+                    if f_split[-2] == vm['name']
+                      processes << {'name': vm['name'], 'status': 'running',
+                                    'path': path}
+                    end
+                  end
+                end
+                break
+              else
+                path = File.join(path, x)
+              end
+            end
+          end
+        end
+      end
+    end
+
+    processes
   end
 
   # Which architecture is supported by the accelerator?
