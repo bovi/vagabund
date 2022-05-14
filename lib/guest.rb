@@ -6,13 +6,13 @@ require_relative 'qemu'
 
 class Guest
   def initialize(iso: nil, disk: nil, size: 100, verbose: false,
-                 arch: 'x86_64', dryrun: false, guest_id: nil,
+                 arch: nil, dryrun: false, guest_id: nil,
                  name: nil, install: false, base_disk: nil,
-                 usb: nil)
+                 usb: nil, edk: nil, edk_vars: nil)
     @iso = iso
     @disk = disk
     @size = size
-    @arch = arch
+    @arch = arch || Qemu.accelerator_support
     @dryrun = dryrun
     @verbose = verbose
     @guest_id = guest_id
@@ -20,6 +20,8 @@ class Guest
     @install = install
     @base_disk = base_disk
     @usb = usb
+    @edk = edk
+    @edk_vars = edk_vars
 
     unless @disk.nil?
       # no disk is defined
@@ -43,7 +45,7 @@ class Guest
     end
 
     @qemu_guest = Qemu.new(vm_id: @guest_id, arch: @arch, disk: @disk,
-                           iso: @iso, usb: @usb)
+                           iso: @iso, usb: @usb, edk: edk, edk_vars: edk_vars)
   end
 
   def ssh_port

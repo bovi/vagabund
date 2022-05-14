@@ -61,9 +61,13 @@ class SusiOptParser
       parser.on("--install [image]", "Install image") do |img|
         raise "Action already defined" unless self.action.nil?
         self.action = :install
-        self.image = img || 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu-releases/20.04.4/ubuntu-20.04.4-live-server-amd64.iso'
-        # 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu-cdimage/ubuntu/releases/20.04.4/release/ubuntu-20.04.4-live-server-arm64.iso'
-        # 'https://mirrors.tuna.tsinghua.edu.cn/ubuntu-releases/20.04.4/ubuntu-20.04.4-live-server-amd64.iso'
+        default_image_path = case Qemu.accelerator_support
+        when 'arm64'
+          "ubuntu-cdimage/ubuntu/releases/20.04.4/release/ubuntu-20.04.4-live-server-arm64.iso"
+        when 'x86_64'
+          "ubuntu-releases/20.04.4/ubuntu-20.04.4-live-server-amd64.iso"
+        end
+        self.image = img || "https://mirrors.tuna.tsinghua.edu.cn/#{default_image_path}"
         self.base = self.base || 'u2004server'
         self.machines = [self.image.split("/").last.split('.')[0..-2].join('.')]
       end

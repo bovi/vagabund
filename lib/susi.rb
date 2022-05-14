@@ -16,6 +16,7 @@ class Susi
   ENV_FILE = 'susi.json'
   ENV_FOLDER = File.expand_path(".susi")
   DEFAULT_BASE_IMG = 'u2004server'
+  EDK_IMAGES = {code: 'edk2-aarch64-code', vars: 'edk2-arm-vars'}
 
   def Susi.execute_action(argv, options)
     logit = -> (msg) { puts msg if options.verbose }
@@ -37,7 +38,8 @@ class Susi
         Susi.init_local_machine_folder(name: vm['name'])
         disk = File.join(ENV_FOLDER, 'machines', vm['name'], 'boot.qcow2')
 
-        qemu_processes_with_disk = `ps awxx | grep qemu`.strip.lines.count {|x|x.match /#{disk}/}
+        qemu_processes_with_disk = `ps awxx | grep qemu`.strip.lines
+        qemu_processes_with_disk = qemu_processes_with_disk.count {|x|x.match /#{disk}/}
         if qemu_processes_with_disk > 0
           puts "Guest '#{vm['name']}' is already running"
           exit
@@ -52,16 +54,40 @@ class Susi
         end
         base_disk = File.join(USER_DISK_FOLDER, base_disk)
         raise "Base image doesn't exist" unless File.exist? base_disk
-        guest = Guest.new(name: vm['name'], guest_id: guest_id, disk: disk, base_disk: base_disk,
-                       usb: vm['usb'],
-                       verbose: options.verbose, dryrun: options.dryrun)
+
+        arch = if vm['arch'].nil?
+          Qemu.accelerator_support
+        else
+          vm['arch']
+        end
+
+        edk = nil
+        edk_vars = nil
+        case arch
+        when 'arm64'
+          EDK_IMAGES.values.each do |edk|
+            src = File.join(USER_MISC_FOLDER, "#{edk}.fd")
+            target = File.join(ENV_FOLDER, 'machines', vm['name'], "#{edk}.fd")
+            unless File.exist? target
+              FileUtils.cp(src, target)
+            end
+          end
+          edk = target = File.join(ENV_FOLDER, 'machines', vm['name'], "#{EDK_IMAGES[:code]}.fd")
+          edk_vars = target = File.join(ENV_FOLDER, 'machines', vm['name'], "#{EDK_IMAGES[:vars]}.fd")
+        end
+
+        guest = Guest.new(name: vm['name'], guest_id: guest_id, disk: disk,
+                          base_disk: base_disk, usb: vm['usb'], arch: vm['arch'],
+                          edk: edk, edk_vars: edk_vars,
+                          verbose: options.verbose, dryrun: options.dryrun)
         guest.start
 
         puts "Waiting until Guest is booted..."
         how_many_tries = 60
         how_many_tries.times do |x|
           begin
-            Net::SSH.start('localhost', 'susi', {password: "susi", port: guest.ssh_port, timeout: 1}) do |ssh|
+            Net::SSH.start('localhost', 'susi',
+                           {password: "susi", port: guest.ssh_port, timeout: 1}) do |ssh|
               puts "Guest is up!"
 
               hostname = ssh.exec!("hostname").strip
@@ -89,7 +115,8 @@ class Susi
                 ssh.exec!("sudo timedatectl set-timezone \"#{tz}\"")
 
                 puts "Install additional packages"
-                ssh.exec!("sudo DEBIAN_FRONTEND=noninteractive apt-get install -qq zsh vim < /dev/null > /dev/null")
+                install_apt = "DEBIAN_FRONTEND=noninteractive apt-get install -qq zsh vim"
+                ssh.exec!("sudo #{install_apt} < /dev/null > /dev/null")
 
                 puts "Create local user and environment in guest"
                 local_user = `whoami`.strip
@@ -118,7 +145,8 @@ class Susi
                   if f =~ /\.pub$/
                     k = File.read(File.join(local_ssh_dir, f)).strip
                     logit.("Add public key '#{f}' to the guest")
-                    ssh.exec!("sudo sh -c 'echo \"#{k}\" >> /home/#{local_user}/.ssh/authorized_keys'")
+                    authorized_keys = "/home/#{local_user}/.ssh/authorized_keys"
+                    ssh.exec!("sudo sh -c 'echo \"#{k}\" >> #{authorized_keys}'")
                   elsif f == 'id_ed25519'
                     ssh_copy.(ssh, "~/.ssh/#{f}", "/home/#{local_user}/.ssh/#{f}")
                     ssh.exec!("sudo chmod 0600 /home/#{local_user}/.ssh/#{f}")
@@ -127,15 +155,17 @@ class Susi
 
                 puts "Setup mounted directories"
                 ssh.exec!("sudo mkdir /home/#{local_user}/cwd")
-                fstab_entry = "CWD /home/#{local_user}/cwd 9p _netdev,trans=virtio,version=9p2000.u,msize=104857600 0 0"
+                plan9_fstab = "9p _netdev,trans=virtio,version=9p2000.u,msize=104857600 0 0"
+                fstab_entry = "CWD /home/#{local_user}/cwd #{plan9_fstab}"
                 ssh.exec!("sudo sh -c 'echo \"#{fstab_entry}\" >> /etc/fstab'")
                 ssh.exec!("sudo mount /home/#{local_user}/cwd")
 
                 # finalize permissions of the user
-                ssh.exec!("echo \"#{local_user} ALL=(ALL:ALL) NOPASSWD: ALL\" | sudo tee -a /etc/sudoers")
+                sudoers = "#{local_user} ALL=(ALL:ALL) NOPASSWD: ALL"
+                ssh.exec!("echo \"#{sudoers}\" | sudo tee -a /etc/sudoers")
                 ssh.exec!("sudo chown -hR #{local_user}:staff /home/#{local_user}")
               else
-                puts "Guets already deployed"
+                puts "Guest already deployed"
               end
             end
 
@@ -209,9 +239,15 @@ class Susi
     when 'modify'
       raise 'No base defined' if options.base.nil?
       disk = File.join(USER_DISK_FOLDER, "#{options.base}.qcow2")
-      vm = Guest.new(guest_id: 99, disk: disk, verbose: options.verbose, dryrun: options.dryrun, install: true)
+      edk = File.join(USER_MISC_FOLDER, "#{options.base}-#{EDK_IMAGES[:code]}.fd")
+      edk_vars = File.join(USER_MISC_FOLDER, "#{options.base}-#{EDK_IMAGES[:vars]}.fd")
+      vm = Guest.new(guest_id: 99, disk: disk, edk: edk, edk_vars: edk_vars,
+                     verbose: options.verbose, dryrun: options.dryrun, install: true)
       vm.start
       vm.connect_vnc
+
+    when 'reset'
+      FileUtils.rm_rf(USER_FOLDER, verbose: options.verbose)
 
     when 'destroy'
       guest_id = if options.base.nil?
@@ -267,9 +303,19 @@ class Susi
           raise "Couldn't download" unless File.exist? iso
         end
 
+        EDK_IMAGES.values.each do |edk|
+          src = File.join(USER_MISC_FOLDER, "#{edk}.fd")
+          target = File.join(USER_MISC_FOLDER, "#{options.base}-#{edk}.fd")
+          FileUtils.cp(src, target)
+        end
+        edk = File.join(USER_MISC_FOLDER, "#{options.base}-#{EDK_IMAGES[:code]}.fd")
+        edk_vars = File.join(USER_MISC_FOLDER, "#{options.base}-#{EDK_IMAGES[:vars]}.fd")
+
         # start guest VM
         disk = File.join(USER_DISK_FOLDER, "#{options.base}.qcow2")
-        vm = Guest.new(guest_id: 99, iso: iso, disk: disk, verbose: options.verbose, dryrun: options.dryrun, install: true)
+        vm = Guest.new(guest_id: 99, iso: iso, disk: disk,
+                       verbose: options.verbose, dryrun: options.dryrun,
+                       install: true, edk: edk, edk_vars: edk_vars)
 
         case options.connect
         when :vnc
@@ -280,10 +326,6 @@ class Susi
           vm.start
           vm.connect_vnc
         end
-
-      # reset the current users setup
-      when :reset
-        FileUtils.rm_rf(USER_FOLDER, verbose: options.verbose)
 
       else
         case options.connect
@@ -327,7 +369,7 @@ class Susi
       FileUtils.mkdir_p(USER_MISC_FOLDER)
 
       # copy and un-pack firmware for ARM architecture
-      %w(edk2-aarch64-code edk2-arm-vars).each do |fw|
+      EDK_IMAGES.values.each do |fw|
         fw_file = "#{fw}.fd.xz"
         FileUtils.cp(File.join(File.dirname(__FILE__), fw_file), USER_MISC_FOLDER)
         `xz -d #{File.join(USER_MISC_FOLDER, fw_file)}`

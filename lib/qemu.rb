@@ -16,7 +16,7 @@ class Qemu
     @disk = disk
     @edk = edk
     @edk_vars = edk_vars
-    @accelerator_support = accelerator_support
+    @accelerator_support = Qemu.accelerator_support
     @usb = usb
 
     @port_forward = port_forward
@@ -50,7 +50,7 @@ class Qemu
     end
 
     # activate accelerator if it is supported for the selected architecture
-    args << "-accel hvf" if accelerator_support == @arch
+    args << "-accel hvf" if Qemu.accelerator_support == @arch
 
     # add memory
     args << "-m 1024"
@@ -95,7 +95,8 @@ class Qemu
     # add passthrough USB devices
     unless @usb.nil?
       @usb.each do |x|
-        args << "-device usb-host,vendorid=#{x['vendor']},productid=#{x['product']},id=#{x['name']}"
+        usb_details = "vendorid=#{x['vendor']},productid=#{x['product']},id=#{x['name']}"
+        args << "-device usb-host,#{usb_details}"
       end
     end
 
@@ -152,7 +153,8 @@ class Qemu
   end
 
   def change_vnc_password(new_password)
-    qmp_single_cmd({execute: 'change-vnc-password', arguments: {password: new_password}})
+    qmp_single_cmd({execute: 'change-vnc-password',
+                    arguments: {password: new_password}})
   end
 
   def shutdown!
@@ -181,26 +183,46 @@ class Qemu
       ps_with_qemu.strip.match(/(qemu-system-.*)$/)[1].split(/\s\-/).each do |param|
         case param
         when /drive\s/
-          f = param.match(/file\=(.*+)/)
-          path = ""
-          unless f.nil?
-            f_split = f[1].split('/')
-            f_split.each do |x|
-              if x == ".susi"
-                vm_file = File.join(path, "susi.json")
-                if File.exist? vm_file
-                  vm_data = JSON.parse(File.read(vm_file))
-                  vm_data["guests"].each do |vm|
-                    if f_split[-2] == vm['name']
-                      processes << {'name': vm['name'], 'status': 'running',
+          t = param.match(/format=(.*?)\,/)
+          unless t.nil?
+            case t[1]
+            when 'qcow2'
+              #f = param.match(/file\=(.*+).*+discard=on/)
+              f = param.split(',').select {|x| x =~ /file=/}
+              path = ""
+              if f.count == 1
+                f_split = f[0].sub('file=', '').split('/')
+                f_split.each do |x|
+                  if x == ".susi"
+                    if path == "/Users/#{`whoami`.strip}"
+                      # this is the user susi folder
+                      # we should only be here if we
+                      # install or modify base images
+                      path = f_split.join('/')
+                      name = path.split('/').last.sub('.qcow2', '')
+                      processes << {'name': name, 'status': 'running',
                                     'path': path}
+                      break
+                    else
+                      vm_file = File.join(path, "susi.json")
+                      if File.exist? vm_file
+                        vm_data = JSON.parse(File.read(vm_file))
+                        vm_data["guests"].each do |vm|
+                          if f_split[-2] == vm['name']
+                            processes << {'name': vm['name'], 'status': 'running',
+                                          'path': path}
+                          end
+                        end
+                      end
+                      break
                     end
+                  else
+                    path = File.join(path, x)
                   end
                 end
-                break
-              else
-                path = File.join(path, x)
               end
+            else
+              # ignore this kind of file format
             end
           end
         end
@@ -216,7 +238,7 @@ class Qemu
   #   'x86_64'   - accelerator for x86 guests
   #   'arm64'    - accelerator for AARCH64 guests
   #   'none'     - no accelerator available
-  def accelerator_support
+  def Qemu.accelerator_support
     result_x86 = `qemu-system-x86_64 -accel help 2>&1`
     result_arm = `qemu-system-aarch64 -accel help 2>&1`
 
