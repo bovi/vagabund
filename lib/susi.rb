@@ -123,6 +123,8 @@ class Susi
                 local_user_id = `echo $UID`.strip
                 ssh.exec!("sudo groupmod -g 20 staff")
                 ssh.exec!("sudo useradd -u #{local_user_id} #{local_user}")
+                # change password to local user name itself !!! INSECURE !!!
+                ssh.exec!("echo \"#{local_user}:#{local_user}\" | sudo chpasswd")
                 ssh.exec!("sudo usermod -g staff #{local_user}")
                 ssh.exec!("sudo mkdir /home/#{local_user}")
                 # setup ZSH
