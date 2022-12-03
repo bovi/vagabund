@@ -29,39 +29,67 @@ mod susi {
     }
 
     pub fn identify_devcontainer(workspace_folder: &str) -> Devcontainer {
+        // manage a list of all found devcontainer files
+        let mut devcontainer_files: Vec<String> = Vec::new();
+
         let devcontainer_path = format!("{}/.devcontainer/devcontainer.json", workspace_folder);
         let devcontainer_path_root = format!("{}/devcontainer.json", workspace_folder);
+        let devcontainer_path_sub = format!("{}/.devcontainer", workspace_folder);
+
         // check if devcontainer.json exists
         if std::path::Path::new(&devcontainer_path).exists() {
-            return parse_devcontainer(&devcontainer_path);
-        } else if std::path::Path::new(&devcontainer_path_root).exists() {
-            return parse_devcontainer(&devcontainer_path_root);
-        } else {
-            let devcontainer_path_sub = format!("{}/.devcontainer", workspace_folder);
-            // check if .devcontainer folder exists
-            if std::path::Path::new(&devcontainer_path_sub).exists() {
-                for entry in std::fs::read_dir(devcontainer_path_sub).unwrap() {
-                    let entry = entry.unwrap();
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let devcontainer_path = format!("{}/devcontainer.json", path.display());
-                        if std::path::Path::new(&devcontainer_path).exists() {
-                            return parse_devcontainer(&devcontainer_path);
-                        } else {
-                            continue;
-                        }
+            devcontainer_files.push(devcontainer_path);
+            //return parse_devcontainer(&devcontainer_path);
+        }
+        
+        if std::path::Path::new(&devcontainer_path_root).exists() {
+            devcontainer_files.push(devcontainer_path_root);
+            //return parse_devcontainer(&devcontainer_path_root);
+        } 
+
+        if std::path::Path::new(&devcontainer_path_sub).exists() {
+            for entry in std::fs::read_dir(devcontainer_path_sub).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    let devcontainer_path = format!("{}/devcontainer.json", path.display());
+                    if std::path::Path::new(&devcontainer_path).exists() {
+                        devcontainer_files.push(devcontainer_path);
+                        //return parse_devcontainer(&devcontainer_path);
                     } else {
                         continue;
                     }
+                } else {
+                    continue;
                 }
             }
         }
 
-        /* no devcontainer.json file found, let's use a default one */
-        Devcontainer {
-            name: "Alpine".to_string(),
-            image: "mcr.microsoft.com/devcontainers/base:alpine-3.16".to_string(),
+        if devcontainer_files.len() == 0 {
+            /* no devcontainer.json file found, let's use a default one */
+            Devcontainer {
+                name: "Alpine".to_string(),
+                image: "mcr.microsoft.com/devcontainers/base:alpine-3.16".to_string(),
+            }
+        } else if devcontainer_files.len() > 1 {
+            // let user choose which devcontainer.json file to use
+            println!("Found multiple devcontainer.json files, please choose one:");
+            for (i, devcontainer_file) in devcontainer_files.iter().enumerate() {
+                println!("{}: {}", i, devcontainer_file);
+            }
+            let mut choice = String::new();
+            std::io::stdin().read_line(&mut choice).expect("Failed to read line");
+            let choice: usize = choice.trim().parse().expect("Please type a number!");
+            // check if choice is valid
+            if choice > devcontainer_files.len() {
+                panic!("Invalid choice!");
+            } else {
+                parse_devcontainer(&devcontainer_files[choice])
+            }
+        } else {
+            parse_devcontainer(&devcontainer_files[0])
         }
+
     }
 }
 
