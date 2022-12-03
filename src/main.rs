@@ -29,6 +29,15 @@ mod susi {
             image: image.to_string(),
         }
     }
+
+    // identify devcontainer in the folder structure of the passed workspace folder
+    // search in the following order:
+    // 1. .devcontainer/devcontainer.json
+    // and return the parse_devcontainer result
+    pub fn identify_devcontainer(workspace_folder: &str) -> Devcontainer {
+        let devcontainer_path = format!("{}/.devcontainer/devcontainer.json", workspace_folder);
+        parse_devcontainer(&devcontainer_path)
+    }
 }
 
 fn main() {
@@ -44,5 +53,14 @@ mod tests {
         let result = susi::parse_devcontainer("test/devcontainer.simple.json");
         assert_eq!(result.name, "Rust");
         assert_eq!(result.image, "mcr.microsoft.com/devcontainers/rust:1-bullseye");
+    }
+
+    #[test]
+    fn identify_devcontainer() {
+        let result_identify = susi::identify_devcontainer("test/workspaces/simple");
+        let result_baseline = susi::parse_devcontainer("test/workspaces/simple/.devcontainer/devcontainer.json");
+
+        assert_eq!(result_identify.name, result_baseline.name);
+        assert_eq!(result_identify.image, result_baseline.image);
     }
 }
