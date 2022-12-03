@@ -4,8 +4,8 @@
 
 ### Configuration Validation
 
-- [ ] define workspacce folder (default is CWD)
-- [ ] identify devcontainer.json (if none is found take a default one)
+- [x] define workspacce folder (always CWD)
+- [x] identify devcontainer.json (if none is found take a default one)
 - [ ] validate metadata is sufficient
 
 ### Environment Creation

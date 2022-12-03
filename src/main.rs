@@ -66,7 +66,11 @@ mod susi {
 }
 
 fn main() {
-    println!("susi");
+    let current_dir = std::env::current_dir().unwrap();
+    let workspace_folder = current_dir.to_str().unwrap();
+
+    let devcontainer = susi::identify_devcontainer(workspace_folder);
+    println!("starting '{}' using '{}'", devcontainer.name, devcontainer.image);
 }
 
 #[cfg(test)]
