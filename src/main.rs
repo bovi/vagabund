@@ -36,7 +36,35 @@ mod susi {
     // and return the parse_devcontainer result
     pub fn identify_devcontainer(workspace_folder: &str) -> Devcontainer {
         let devcontainer_path = format!("{}/.devcontainer/devcontainer.json", workspace_folder);
-        parse_devcontainer(&devcontainer_path)
+        let devcontainer_path_root = format!("{}/devcontainer.json", workspace_folder);
+        // check if devcontainer.json exists
+        if std::path::Path::new(&devcontainer_path).exists() {
+            return parse_devcontainer(&devcontainer_path);
+        } else if std::path::Path::new(&devcontainer_path_root).exists() {
+            return parse_devcontainer(&devcontainer_path_root);
+        } else {
+            let devcontainer_path_sub = format!("{}/.devcontainer", workspace_folder);
+            for entry in std::fs::read_dir(devcontainer_path_sub).unwrap() {
+                let entry = entry.unwrap();
+                let path = entry.path();
+                if path.is_dir() {
+                    let devcontainer_path = format!("{}/devcontainer.json", path.display());
+                    if std::path::Path::new(&devcontainer_path).exists() {
+                        return parse_devcontainer(&devcontainer_path);
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                }
+            }
+        }
+
+        // if no devcontainer.json was found, return empty Devcontainer
+        Devcontainer {
+            name: String::new(),
+            image: String::new(),
+        }
     }
 }
 
@@ -56,10 +84,26 @@ mod tests {
     }
 
     #[test]
-    fn identify_devcontainer() {
+    fn identify_devcontainer_simple() {
         let result_identify = susi::identify_devcontainer("test/workspaces/simple");
         let result_baseline = susi::parse_devcontainer("test/workspaces/simple/.devcontainer/devcontainer.json");
 
+        assert_eq!(result_identify.name, result_baseline.name);
+        assert_eq!(result_identify.image, result_baseline.image);
+    }
+
+    #[test]
+    fn identify_devcontainer_complex_one() {
+        let result_identify = susi::identify_devcontainer("test/workspaces/complex1");
+        let result_baseline = susi::parse_devcontainer("test/workspaces/complex1/devcontainer.json");
+        assert_eq!(result_identify.name, result_baseline.name);
+        assert_eq!(result_identify.image, result_baseline.image);
+    }
+
+    #[test]
+    fn identify_devcontainer_complex_two() {
+        let result_identify = susi::identify_devcontainer("test/workspaces/complex2");
+        let result_baseline = susi::parse_devcontainer("test/workspaces/complex2/.devcontainer/jfdasjfh/devcontainer.json");
         assert_eq!(result_identify.name, result_baseline.name);
         assert_eq!(result_identify.image, result_baseline.image);
     }

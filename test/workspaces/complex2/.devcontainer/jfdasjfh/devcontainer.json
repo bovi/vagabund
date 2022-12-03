@@ -1,7 +1,7 @@
 // For format details, see https://aka.ms/devcontainer.json. For config options, see the
 // README at: https://github.com/devcontainers/templates/tree/main/src/rust
 {
-	"name": "Simple Example",
+	"name": "Complex two Example",
 	"image": "mcr.microsoft.com/devcontainers/rust:1-bullseye"
 
 	// Features to add to the dev container. More info: https://containers.dev/features.
