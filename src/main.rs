@@ -9,6 +9,7 @@ mod susi {
         pub image: String,
     }
 
+    /* parse devcontainer.json from filename and return devcontainer struct */
     pub fn parse_devcontainer(filename: &str) -> Devcontainer {
         let mut file = File::open(filename).expect("file not found");
         let mut contents = String::new();
@@ -28,51 +29,43 @@ mod susi {
         }
     }
 
+    /* search in workspace_folder for devcontainer.json, return devcontainer struct */
     pub fn identify_devcontainer(workspace_folder: &str) -> Devcontainer {
-        // manage a list of all found devcontainer files
         let mut devcontainer_files: Vec<String> = Vec::new();
 
         let devcontainer_path = format!("{}/.devcontainer/devcontainer.json", workspace_folder);
         let devcontainer_path_root = format!("{}/devcontainer.json", workspace_folder);
         let devcontainer_path_sub = format!("{}/.devcontainer", workspace_folder);
 
-        // check if devcontainer.json exists
         if std::path::Path::new(&devcontainer_path).exists() {
             devcontainer_files.push(devcontainer_path);
-            //return parse_devcontainer(&devcontainer_path);
         }
         
         if std::path::Path::new(&devcontainer_path_root).exists() {
             devcontainer_files.push(devcontainer_path_root);
-            //return parse_devcontainer(&devcontainer_path_root);
         } 
 
         if std::path::Path::new(&devcontainer_path_sub).exists() {
-            for entry in std::fs::read_dir(devcontainer_path_sub).unwrap() {
+            std::fs::read_dir(devcontainer_path_sub).unwrap().for_each(|entry| {
                 let entry = entry.unwrap();
                 let path = entry.path();
                 if path.is_dir() {
                     let devcontainer_path = format!("{}/devcontainer.json", path.display());
                     if std::path::Path::new(&devcontainer_path).exists() {
                         devcontainer_files.push(devcontainer_path);
-                        //return parse_devcontainer(&devcontainer_path);
-                    } else {
-                        continue;
                     }
-                } else {
-                    continue;
                 }
-            }
+            });
         }
 
-        if devcontainer_files.len() == 0 {
+        if devcontainer_files.is_empty() {
             /* no devcontainer.json file found, let's use a default one */
             Devcontainer {
                 name: "Alpine".to_string(),
                 image: "mcr.microsoft.com/devcontainers/base:alpine-3.16".to_string(),
             }
         } else if devcontainer_files.len() > 1 {
-            // let user choose which devcontainer.json file to use
+            /* let the user choose if there is more than one file. TODO: this part is not auto tested! */
             println!("Found multiple devcontainer.json files, please choose one:");
             for (i, devcontainer_file) in devcontainer_files.iter().enumerate() {
                 println!("{}: {}", i, devcontainer_file);
@@ -80,16 +73,15 @@ mod susi {
             let mut choice = String::new();
             std::io::stdin().read_line(&mut choice).expect("Failed to read line");
             let choice: usize = choice.trim().parse().expect("Please type a number!");
-            // check if choice is valid
             if choice > devcontainer_files.len() {
                 panic!("Invalid choice!");
             } else {
                 parse_devcontainer(&devcontainer_files[choice])
             }
         } else {
+            /* only one devcontainer.json file found, let's use it */
             parse_devcontainer(&devcontainer_files[0])
         }
-
     }
 }
 
