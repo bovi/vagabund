@@ -1,0 +1,5 @@
+{
+	"name": "susi",
+	"image": "mcr.microsoft.com/devcontainers/ruby:0-3-bullseye",
+	"postCreateCommand": "apt update && apt upgrade && apt install qemu-system"
+}

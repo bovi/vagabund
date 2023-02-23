@@ -1,3 +1,5 @@
 #!/usr/bin/env ruby
 
-puts 'susi'
+require_relative '../lib/susi'
+
+Susi::CLI.start(ARGV)
