@@ -1,5 +1,7 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/debian
 {
-	"name": "susi",
-	"image": "mcr.microsoft.com/devcontainers/ruby:0-3-bullseye",
-	"postCreateCommand": "apt update && apt upgrade && apt install qemu-system"
+	"name": "Debian",
+	"image": "mcr.microsoft.com/devcontainers/base:bullseye",
+	"postCreateCommand": "sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install -y ruby rake ruby-test-unit qemu-system-x86",
 }

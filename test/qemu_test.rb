@@ -4,7 +4,6 @@ require_relative '../lib/susi'
 
 class QEMU_Test < Test::Unit::TestCase
   def test_create_img
-    # create a temporary filename
     file = Tempfile.new('qemu_test_img').path
     size = 40
 
