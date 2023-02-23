@@ -1,0 +1,3 @@
+class Susi
+  # TODO
+end
