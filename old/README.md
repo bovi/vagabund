@@ -1,76 +1,114 @@
-# susi - QEMU-based CLI VM manager for macOS
+# susi
 
-## Usage
+## TODO
 
-### Install template
+### Configuration Validation
 
-To download and install a default VM base machine use:
+- [x] define workspacce folder (always CWD)
+- [x] identify devcontainer.json (if none is found take a default one)
+- [ ] validate metadata is sufficient
 
-```susi --install```
+### Environment Creation
 
-This command will download Ubuntu 20.04 Server, create a base image
-and start it. Afterwards it will instantiate a VNC session to perform
-the installation. Currently you have to peform the installation by 
-hand. The following things need to be considered during installation:
+- [ ] validate access to container orchestrator
+- [ ] execute initializeCommand
+- [ ] pull/build/execute image
+- [ ] validate the correct creation of the image
+- [ ] in case of updateRemoteUserUID perform UID/GID sync
+- [ ] create container
+- [ ] validate the correct creation of the container
+- [ ] apply mount points
+- [ ] apply environment variables
+- [ ] apply user configuration
+- [ ] execute onCreateCommand, updateContentCommand and postCreateCommand
+- [ ] apply remote environment variables and user configuration
 
-- create user ```susi``` with password ```susi```
-- install OpenSSH Server
-- add ```susi ALL=(ALL) NOPASSWD: ALL``` to the sudoers file
+### Environment Stop
 
-### Modify template
+- [ ] stop container
 
-To modify an existing template you can type:
+### Environment Resume
 
-```susi modify --base=u2004server```
+- [ ] restart all related containers
+- [ ] execute postStartCommand and postAttachCommand
 
-Where ```u2004server``` is the template you want to modify. You can access
-the guest by typing:
+## devcontainer specification
 
-```susi ssh --base=u2004server```
+Search a devcontainer.json file in the following directories:
+- .devcontainer/devcontainer.json
+- .devcontainer.json
+- .devcontainer/**/devcontainer.json
 
-or
+There might be more than one devcontainer filer in a project. In this case, the user should be able to select which one to use.
 
-```susi vnc --base=u2004server```
+A table with properties:
 
-### Work with VM
+| Property                    | supported | type       |
+|-----------------------------|-----------|------------|
+| name                        | no        | general    |
+| forwardPorts                | no        | general    |
+| portsAttributes             | no        | general    |
+| otherPortsAttributes        | no        | general    |
+| remoteEnv                   | no        | general    |
+| remoteUser                  | no        | general    |
+| containerEnv                | no        | general    |
+| containerUser               | no        | general    |
+| updateRemoteUserUID         | no        | general    |
+| userEnvProbe                | no        | general    |
+| overrideCommand             | no        | general    |
+| shutdownAction              | no        | general    |
+| init                        | no        | general    |
+| privileged                  | no        | general    |
+| capAdd                      | no        | general    |
+| securityOpt                 | no        | general    |
+| mounts                      | no        | general    |
+| features                    | no        | general    |
+| overrideFeatureInstallOrder | no        | general    |
+| customizations              | no        | general    |
+| image                       | no        | image      |
+| build.dockerfile            | no        | image      |
+| build.context               | no        | image      |
+| build.args                  | no        | image      |
+| build.target                | no        | image      |
+| build.cacheFrom             | no        | image      |
+| appPort                     | no        | image      |
+| workspaceMount              | no        | image      |
+| workspaceFolder             | no        | image      |
+| runArgs                     | no        | image      |
+| dockerComposeFile           | no        | compose    |
+| service                     | no        | compose    |
+| runServices                 | no        | compose    |
+| workspaceFolder             | no        | compose    |
+| initializeCommand           | no        | lifecycle  |
+| onCreateCommand             | no        | lifecycle  |
+| updateContentCommand        | no        | lifecycle  |
+| postCreateCommand           | no        | lifecycle  |
+| postStartCommand            | no        | lifecycle  |
+| postAttachCommand           | no        | lifecycle  |
+| waitFor                     | no        | lifecycle  |
+| hostRequirements.cpus       | no        | host       |
+| hostRequirements.memory     | no        | host       |
+| hostRequirements.storage    | no        | host       |
+| label                       | no        | port       |
+| protocol                    | no        | port       |
+| onAutoForward               | no        | port       |
+| requireLocalPort            | no        | port       |
+| elevateIfNeeded             | no        | port       |
 
-First an environment needs to be initialized:
+### Environment variables
 
-```susi --init vm1,vm2,vm3```
+Environment variables should be available in the following properties:
 
-This command creates the environment file ```susi.json```. This file
-contains the definition of each machine for this environment.
+| Variable                            | supported | type       |
+|-------------------------------------|-----------|------------|
+| ${localEnv:VARIABLEN_NAME}          | no        | general    |
+| ${containerEnv:VARIABLE_NAME}       | no        | general    |
+| ${localWorkspaceFolder}             | no        | general    |
+| ${containerWorkspaceFolder}         | no        | general    |
+| ${localWorkspaceFolderBasename}     | no        | general    |
+| ${containerWorkspaceFolderBasename} | no        | general    |
+| ${devcontainerId}                   | no        | general    |
 
-To start the guest type:
+### Features
 
-```susi up```
-
-This command will create a linked clone of the default template and
-start the machines defined in ```susi.json```.
-
-To connect to the guest via SSH type:
-
-```susi ssh```
-
-To connect to the guest via VNC type:
-
-```susi vnc```
-
-After you are finished the guest can be shutdown by typing:
-
-```susi down```
-
-The machine can be deleted with:
-
-```susi destroy```
-
-### Adding USB devices to the VM
-
-```susi``` comes with an USB wizard which helps to add USB devices to the
-machine. You can just type:
-
-```susi usb```
-
-And the wizard is being started. Follow the instruction to add USB device(s)
-to the ```susi.json``` file. The defined USB device(s) will be added to the
-guest.
+Consideration of features needs to be done later.
