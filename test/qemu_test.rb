@@ -36,6 +36,7 @@ class QEMU_Test < Test::Unit::TestCase
     assert_equal "running", vm.state
     assert_equal 1024, vm.memory
     assert_equal 1, vm.cpu_count
+    assert_equal 5900, vm.vnc_port
 
     # cleanup
     vm.quit!

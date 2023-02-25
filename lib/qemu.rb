@@ -128,7 +128,7 @@ module Susi
     end
 
     def cpu_count
-      qmp_single_cmd({execute: "query-cpus"})['return'].count
+      qmp_single_cmd({execute: "query-cpus-fast"})['return'].count
     end
   end
 end
