@@ -41,7 +41,7 @@ module Susi
       # QMP access
       @qmp_port = 6000 + vnc
       qemu_arguments << "-chardev socket,id=mon0,host=localhost,port=#{@qmp_port},server=on,wait=off"
-      qemu_arguments << "-mon chardev=mon0,mode=control,pretty=on"
+      qemu_arguments << "-mon chardev=mon0,mode=control"
 
       qemu_cmd = "qemu-system-x86_64 #{qemu_arguments.join(' ')} 2>&1"
       spawn(qemu_cmd)
@@ -62,7 +62,6 @@ module Susi
             loop do
               IO.select([qmp], nil, nil, 0.001)
               msg << qmp.read_nonblock(1)
-              sleep 0.001
             end
           rescue IO::EAGAINWaitReadable
             # blocking happened
@@ -72,26 +71,20 @@ module Susi
           msg
         }
         qmp_pipe.({execute: "qmp_capabilities"})
-        result = block.call(qmp_pipe)
-        if skip_parse
-          result
-        else
-          JSON.parse(result)
-        end
+        result = block.call(qmp_pipe).split("\r\n")
+        result.map {|r| JSON.parse(r)}
       end
     end
 
     def qmp_single_cmd(cmd)
       result = qmp_open { |qmp| qmp.(cmd) }
-      if result.has_key? 'return'
-        result['return']
-      else
-        raise RuntimeError, "QMP return object invalid: #{result}"
+      result.each do |r|
+        if r.has_key? 'return'
+          next if r['return'].empty?
+          return r['return']
+        end
       end
-    end
-
-    def qmp_single_cmd_skip_parse(cmd)
-      qmp_open(skip_parse: true) { |qmp| qmp.(cmd) }
+      {}
     end
 
     def change_vnc_password(new_password)
@@ -100,11 +93,11 @@ module Susi
     end
 
     def shutdown!
-      qmp_single_cmd_skip_parse({execute: "system_powerdown"})
+      qmp_single_cmd({execute: "system_powerdown"})
     end
 
     def quit!
-      qmp_single_cmd_skip_parse({execute: "quit"})
+      qmp_single_cmd({execute: "quit"})
     end
 
     def name
