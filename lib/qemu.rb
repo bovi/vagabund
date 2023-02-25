@@ -38,19 +38,20 @@ module Susi
       qemu_arguments << "-name #{name}"
       qemu_arguments << "-m #{ram}"
       qemu_arguments << "-smp #{cpu}"
-      qemu_arguments << "-drive if=virtio,format=qcow2,file=#{img},discard=on"
       qemu_arguments << "-vnc localhost:#{vnc},password=on"
       qemu_arguments << "-cdrom #{iso}" unless iso.nil?
+
+      # disk configuration
+      qemu_arguments << "-drive if=virtio,format=qcow2,file=#{img},discard=on"
 
       # QMP access
       @qmp_port = 6000 + vnc
       qemu_arguments << "-chardev socket,id=mon0,host=localhost,port=#{@qmp_port},server=on,wait=off"
       qemu_arguments << "-mon chardev=mon0,mode=control"
 
-      qemu_cmd = "qemu-system-x86_64 #{qemu_arguments.join(' ')} 2>&1"
-      spawn(qemu_cmd)
+      qemu_arguments << "-daemonize"
 
-      sleep 3
+      `qemu-system-x86_64 #{qemu_arguments.join(' ')} 2>&1`
 
       change_vnc_password('susi')
     end
