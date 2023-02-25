@@ -15,4 +15,4 @@ jobs:
           sudo apt-get update
           sudo apt-get install qemu-system
       - name: Run tests
-        run: bundle exec rake
+        run: rake
