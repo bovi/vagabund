@@ -14,18 +14,22 @@ module Susi
       raise "Failed to create disk image: #{result}" unless $?.success?
     end
 
+    def qmp_port
+      @qmp_port
+    end
+
     def initialize(qmp_port: nil,
-                  name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
+                  name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, iso: nil)
       if qmp_port.nil?
         # call start_vm to create a new VM and pass all arguments to it
-        start_vm(name: name, img: img, ram: ram, cpu: cpu, vnc: vnc, boot: boot)
+        start_vm(name: name, img: img, ram: ram, cpu: cpu, vnc: vnc, iso: iso)
       else
         @qmp_port = qmp_port
       end
     end
 
     # start a QEMU virtual machine
-    def start_vm(name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
+    def start_vm(name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, iso: nil)
       raise ArgumentError, "Name is required" if name.nil?
       raise ArgumentError, "Image path is required" if img.nil?
       raise ArgumentError, "VNC port is required" if vnc.nil?
@@ -34,9 +38,9 @@ module Susi
       qemu_arguments << "-name #{name}"
       qemu_arguments << "-m #{ram}"
       qemu_arguments << "-smp #{cpu}"
-      qemu_arguments << "-hda #{img}"
+      qemu_arguments << "-drive if=virtio,format=qcow2,file=#{img},discard=on"
       qemu_arguments << "-vnc localhost:#{vnc},password=on"
-      qemu_arguments << "-boot #{boot}" unless boot.nil?
+      qemu_arguments << "-cdrom #{iso}" unless iso.nil?
 
       # QMP access
       @qmp_port = 6000 + vnc
@@ -49,8 +53,6 @@ module Susi
       sleep 3
 
       change_vnc_password('susi')
-
-      {state: state, qmp_port: @qmp_port}
     end
 
     def qmp_open(skip_parse: false, &block)
@@ -135,12 +137,22 @@ module Susi
 
     def img
       qmp_single_cmd({execute: "query-block"}).each do |bd|
-        if bd['device'] == 'ide0-hd0'
+        if bd['device'] == 'virtio0'
           return bd['inserted']['file']
         end
       end
 
-      raise RuntimeError, "Couldn't find ide0-hd0 disk"
+      raise RuntimeError, "Couldn't find virtio0 disk"
+    end
+
+    def iso
+      qmp_single_cmd({execute: "query-block"}).each do |bd|
+        if bd['device'] == 'ide1-cd0'
+          return bd['inserted']['file']
+        end
+      end
+
+      nil
     end
   end
 end

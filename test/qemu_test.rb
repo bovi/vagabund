@@ -28,17 +28,22 @@ class QEMU_Test < Test::Unit::TestCase
 
     # setup VM and start it
     file = Tempfile.new('qemu_test_img').path
+    iso = Tempfile.new('qemu_test_iso').path
     size = 40
     Susi::QEMU.create_img(size: size, path: file)
-    vm = Susi::QEMU.new(name: "test", img: file, ram: 1024, cpu: 1, vnc: 0, boot: "c")
+    vm = Susi::QEMU.new(name: "test", img: file, ram: 1024, cpu: 1, vnc: 0, iso: iso)
+    vm2 = Susi::QEMU.new(qmp_port: vm.qmp_port)
 
-    # is the VM correctly started?
-    assert_equal "running", vm.state
-    assert_equal "test", vm.name
-    assert_equal 1024, vm.ram
-    assert_equal 1, vm.cpu
-    assert_equal 5900, vm.vnc
-    assert_equal file, vm.img
+    [vm, vm2].each do |v|
+      # is the VM correctly started?
+      assert_equal "running", v.state
+      assert_equal "test", v.name
+      assert_equal 1024, v.ram
+      assert_equal 1, v.cpu
+      assert_equal 5900, v.vnc
+      assert_equal file, v.img
+      assert_equal iso, v.iso
+    end
 
     # cleanup
     vm.quit!
