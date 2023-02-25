@@ -35,7 +35,6 @@ class QEMU_Test < Test::Unit::TestCase
     vm2 = Susi::QEMU.new(qmp_port: vm.qmp_port)
 
     [vm, vm2].each do |v|
-      # is the VM correctly started?
       assert_equal "running", v.state
       assert_equal "test", v.name
       assert_equal 1024, v.ram
