@@ -6,35 +6,35 @@ module Susi
   # encapsulating QEMU commands
   class QEMU
     # create a QEMU image file
-    def self.create_img(size_in_g: 40, path: nil)
+    def self.create_img(size: 40, path: nil)
       raise ArgumentError, "Path is required" if path.nil?
 
-      result = `qemu-img create -f qcow2 #{path} #{size_in_g}G 2>&1`
+      result = `qemu-img create -f qcow2 #{path} #{size}G 2>&1`
 
       raise "Failed to create disk image: #{result}" unless $?.success?
     end
 
     def initialize(qmp_port: nil,
-                  name: nil, img_path: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
+                  name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
       if qmp_port.nil?
         # call start_vm to create a new VM and pass all arguments to it
-        start_vm(name: name, img_path: img_path, ram: ram, cpu: cpu, vnc: vnc, boot: boot)
+        start_vm(name: name, img: img, ram: ram, cpu: cpu, vnc: vnc, boot: boot)
       else
         @qmp_port = qmp_port
       end
     end
 
     # start a QEMU virtual machine
-    def start_vm(name: nil, img_path: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
+    def start_vm(name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, boot: nil)
       raise ArgumentError, "Name is required" if name.nil?
-      raise ArgumentError, "Image path is required" if img_path.nil?
+      raise ArgumentError, "Image path is required" if img.nil?
       raise ArgumentError, "VNC port is required" if vnc.nil?
 
       qemu_arguments = []
       qemu_arguments << "-name #{name}"
       qemu_arguments << "-m #{ram}"
       qemu_arguments << "-smp #{cpu}"
-      qemu_arguments << "-hda #{img_path}"
+      qemu_arguments << "-hda #{img}"
       qemu_arguments << "-vnc localhost:#{vnc},password=on"
       qemu_arguments << "-boot #{boot}" unless boot.nil?
 
@@ -82,7 +82,12 @@ module Susi
     end
 
     def qmp_single_cmd(cmd)
-      qmp_open { |qmp| qmp.(cmd) }
+      result = qmp_open { |qmp| qmp.(cmd) }
+      if result.has_key? 'return'
+        result['return']
+      else
+        raise RuntimeError, "QMP return object invalid: #{result}"
+      end
     end
 
     def qmp_single_cmd_skip_parse(cmd)
@@ -102,33 +107,47 @@ module Susi
       qmp_single_cmd_skip_parse({execute: "quit"})
     end
 
+    def name
+      qmp_single_cmd({execute: "query-name"})['name']
+    end
+
     def state
-      qmp_single_cmd({execute: "query-status"})['return']['status']
+      qmp_single_cmd({execute: "query-status"})['status']
     end
 
     def arch
-      qmp_single_cmd({execute: "query-target"})['return']['arch']
+      qmp_single_cmd({execute: "query-target"})['arch']
     end
 
     def kvm?
-      qmp_single_cmd({execute: "query-kvm"})['return']['enabled']
+      qmp_single_cmd({execute: "query-kvm"})['enabled']
     end
 
     def kvm_present?
-      qmp_single_cmd({execute: "query-kvm"})['return']['present']
+      qmp_single_cmd({execute: "query-kvm"})['present']
     end
 
-    def vnc_port
-      qmp_single_cmd({execute: "query-vnc"})['return']['service'].to_i
+    def vnc
+      qmp_single_cmd({execute: "query-vnc"})['service'].to_i
     end
 
-    def memory
-      memory_in_bytes = qmp_single_cmd({execute: "query-memory-size-summary"})['return']['base-memory']
-      memory_in_bytes / 1024 / 1024
+    def ram
+      ram_in_bytes = qmp_single_cmd({execute: "query-memory-size-summary"})['base-memory']
+      ram_in_bytes / 1024 / 1024
     end
 
-    def cpu_count
-      qmp_single_cmd({execute: "query-cpus-fast"})['return'].count
+    def cpu
+      qmp_single_cmd({execute: "query-cpus-fast"}).count
+    end
+
+    def img
+      qmp_single_cmd({execute: "query-block"}).each do |bd|
+        if bd['device'] == 'ide0-hd0'
+          return bd['inserted']['file']
+        end
+      end
+
+      raise RuntimeError, "Couldn't find ide0-hd0 disk"
     end
   end
 end
