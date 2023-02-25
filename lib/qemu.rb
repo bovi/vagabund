@@ -57,7 +57,6 @@ module Susi
       TCPSocket.open('localhost', @qmp_port) do |qmp|
         qmp_pipe = -> (cmd) {
           qmp.puts(cmd.to_json)
-          sleep 1
           msg = ''
           begin
             loop do
@@ -83,13 +82,11 @@ module Susi
     end
 
     def qmp_single_cmd(cmd)
-      result = qmp_open { |qmp| qmp.(cmd) }
-      result
+      qmp_open { |qmp| qmp.(cmd) }
     end
 
     def qmp_single_cmd_skip_parse(cmd)
-      result = qmp_open(skip_parse: true) { |qmp| qmp.(cmd) }
-      result
+      qmp_open(skip_parse: true) { |qmp| qmp.(cmd) }
     end
 
     def change_vnc_password(new_password)
