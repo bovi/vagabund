@@ -21,7 +21,7 @@ module Susi
     def initialize(qmp_port: nil,
                   name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, iso: nil)
       if qmp_port.nil?
-        # call start_vm to create a new VM and pass all arguments to it
+        @qmp_port = 6000 + vnc
         start_vm(name: name, img: img, ram: ram, cpu: cpu, vnc: vnc, iso: iso)
       else
         @qmp_port = qmp_port
@@ -45,8 +45,7 @@ module Susi
       qemu_arguments << "-drive if=virtio,format=qcow2,file=#{img},discard=on"
 
       # QMP access
-      @qmp_port = 6000 + vnc
-      qemu_arguments << "-chardev socket,id=mon0,host=localhost,port=#{@qmp_port},server=on,wait=off"
+      qemu_arguments << "-chardev socket,id=mon0,host=localhost,port=#{qmp_port},server=on,wait=off"
       qemu_arguments << "-mon chardev=mon0,mode=control"
 
       qemu_arguments << "-daemonize"
@@ -57,7 +56,7 @@ module Susi
     end
 
     def qmp_open(skip_parse: false, &block)
-      TCPSocket.open('localhost', @qmp_port) do |qmp|
+      TCPSocket.open('localhost', qmp_port) do |qmp|
         qmp_pipe = -> (cmd) {
           qmp.puts(cmd.to_json)
           msg = ''
