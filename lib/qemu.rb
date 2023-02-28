@@ -14,31 +14,39 @@ module Susi
       raise "Failed to create disk image: #{result}" unless $?.success?
     end
 
+    def vm_id
+      @vm_id
+    end
+
     def qmp_port
-      @qmp_port
+      6000 + vm_id
+    end
+
+    def vnc_port
+      5900 + vm_id
     end
 
     def initialize(qmp_port: nil,
-                  name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, iso: nil)
+                  name: nil, img: nil, ram: 1024, cpu: 1, vm_id: nil, iso: nil)
       if qmp_port.nil?
-        @qmp_port = 6000 + vnc
-        start_vm(name: name, img: img, ram: ram, cpu: cpu, vnc: vnc, iso: iso)
+        @vm_id = vm_id
+        start_vm(name: name, img: img, ram: ram, cpu: cpu, iso: iso)
       else
-        @qmp_port = qmp_port
+        @vm_id = qmp_port - 6000
       end
     end
 
     # start a QEMU virtual machine
-    def start_vm(name: nil, img: nil, ram: 1024, cpu: 1, vnc: nil, iso: nil)
+    def start_vm(name: nil, img: nil, ram: 1024, cpu: 1, iso: nil)
       raise ArgumentError, "Name is required" if name.nil?
       raise ArgumentError, "Image path is required" if img.nil?
-      raise ArgumentError, "VNC port is required" if vnc.nil?
+      raise ArgumentError, "VM ID is required" if vm_id.nil?
 
       qemu_arguments = []
       qemu_arguments << "-name #{name}"
       qemu_arguments << "-m #{ram}"
       qemu_arguments << "-smp #{cpu}"
-      qemu_arguments << "-vnc localhost:#{vnc},password=on"
+      qemu_arguments << "-vnc localhost:#{vnc_port},password=on"
       qemu_arguments << "-cdrom #{iso}" unless iso.nil?
 
       # disk configuration
@@ -131,10 +139,6 @@ module Susi
 
     def kvm_present?
       qmp_single_cmd({execute: "query-kvm"})['present']
-    end
-
-    def vnc
-      qmp_single_cmd({execute: "query-vnc"})['service'].to_i
     end
 
     def ram

@@ -37,7 +37,7 @@ class QEMU_Test < Test::Unit::TestCase
     iso = Tempfile.new('qemu_test_iso').path
     size = 40
     Susi::QEMU.create_img(size: size, path: file)
-    vm = Susi::QEMU.new(name: "test", img: file, ram: 1024, cpu: 1, vnc: 0, iso: iso)
+    vm = Susi::QEMU.new(name: "test", img: file, ram: 1024, cpu: 1, vm_id: 0, iso: iso)
     vm2 = Susi::QEMU.new(qmp_port: vm.qmp_port)
 
     [vm, vm2].each do |v|
@@ -45,7 +45,8 @@ class QEMU_Test < Test::Unit::TestCase
       assert_equal "test", v.name
       assert_equal 1024, v.ram
       assert_equal 1, v.cpu
-      assert_equal 5900, v.vnc
+      assert_equal 5900, v.vnc_port
+      assert_equal 6000, v.qmp_port
       assert_equal file, v.img
       assert_equal iso, v.iso
     end
@@ -68,7 +69,7 @@ class QEMU_Test < Test::Unit::TestCase
     assert_equal "n", service.vms.first.name
     assert_equal "test/data/00service.img", service.vms.first.img
     assert_equal 1024, service.vms.first.ram
-    assert_equal 5900, service.vms.first.vnc
+    assert_equal 5900, service.vms.first.vnc_port
     assert_equal 6000, service.vms.first.qmp_port
 
     service.vms.first.quit!
@@ -95,7 +96,7 @@ class QEMU_Test < Test::Unit::TestCase
       assert_equal "n#{i}", service.vms[i].name
       assert_equal "test/data/01service#{i}.img", service.vms[i].img
       assert_equal 1024, service.vms[i].ram
-      assert_equal 5900 + i, service.vms[i].vnc
+      assert_equal 5900 + i, service.vms[i].vnc_port
       assert_equal 6000 + i, service.vms[i].qmp_port
     end
 
