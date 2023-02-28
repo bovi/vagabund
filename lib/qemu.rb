@@ -87,7 +87,7 @@ module Susi
       end
     end
 
-    def qmp_single_cmd(cmd)
+    def qmp_single_cmd_raw(cmd)
       result = qmp_open { |qmp| qmp.(cmd) }
       result.each do |r|
         if r.has_key? 'return'
@@ -95,21 +95,35 @@ module Susi
           return r['return']
         end
       end
+
       {}
     end
 
+    def qmp_single_cmd(cmd)
+      result = {}
+      # this is kind of a hack
+      # if the QMP doesn't return something we just try again
+      5.times do
+        result = qmp_single_cmd_raw(cmd)
+        break unless result.empty?
+        sleep 0.1
+      end
+      raise RuntimeError, "QMP command failed: #{cmd}" if result.empty?
+      result
+    end
+
     def change_vnc_password(new_password)
-      qmp_single_cmd({execute: 'change-vnc-password',
-                      arguments: {password: new_password}})
+      qmp_single_cmd_raw({execute: 'change-vnc-password',
+                         arguments: {password: new_password}})
     end
 
     def shutdown!
-      qmp_single_cmd({execute: "system_powerdown"})
+      qmp_single_cmd_raw({execute: "system_powerdown"})
     end
 
     def quit!
       n = self.name
-      qmp_single_cmd({execute: "quit"})
+      qmp_single_cmd_raw({execute: "quit"})
 
       # wait for QEMU to quit
       Timeout.timeout(5) do
