@@ -36,4 +36,28 @@ module Susi
       end
     end
   end
+
+  class Service
+    attr_reader :vms
+
+    def initialize file
+      @file = file
+      @vms = []
+      init_vms
+    end
+
+    def init_vms
+      json = JSON.parse(File.read(@file))
+      # each with index
+      json['vms'].each_with_index do |vm, i|
+        @vms << Susi::QEMU.new(name: vm["name"], img: vm["img"], ram: vm["ram"], cpu: vm["cpu"], vnc: i)
+      end
+    end
+
+    def quit!
+      @vms.each do |vm|
+        vm.quit!
+      end
+    end
+  end
 end

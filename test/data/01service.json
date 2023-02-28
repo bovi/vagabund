@@ -1,0 +1,23 @@
+{
+  "vms":
+         [
+          {
+            "name":"n0",
+            "img":"test/data/01service0.img",
+            "ram":1024,
+            "cpu":1
+          },
+          {
+            "name":"n1",
+            "img":"test/data/01service1.img",
+            "ram":1024,
+            "cpu":1
+          },
+          {
+            "name":"n2",
+            "img":"test/data/01service2.img",
+            "ram":1024,
+            "cpu":1
+          }
+          ]
+}

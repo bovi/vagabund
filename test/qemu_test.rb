@@ -3,6 +3,12 @@ require 'tempfile'
 require_relative '../lib/susi'
 
 class QEMU_Test < Test::Unit::TestCase
+  def assert_qemu_is_gone
+    # check if process is dead
+    result = `ps aux | grep qemu-system-x86_64 | grep -v grep`
+    assert_equal "", result, 'there are still qemu processes running'
+  end
+
   def test_create_img
     # check if arguments are correctly checked
     assert_raise ArgumentError do
@@ -46,5 +52,62 @@ class QEMU_Test < Test::Unit::TestCase
 
     # cleanup
     vm.quit!
+
+    assert_qemu_is_gone
   end
+
+  def test_load_one_service
+    img_file = File.join(File.dirname(__FILE__), 'data', '00service.img')   
+    size = 40
+    Susi::QEMU.create_img(size: size, path: img_file)
+
+    file = File.join(File.dirname(__FILE__), 'data', '00service.json')   
+    service = Susi::Service.new(file)
+
+    assert_equal 1, service.vms.count
+    assert_equal "n", service.vms.first.name
+    assert_equal "test/data/00service.img", service.vms.first.img
+    assert_equal 1024, service.vms.first.ram
+    assert_equal 5900, service.vms.first.vnc
+    assert_equal 6000, service.vms.first.qmp_port
+
+    service.vms.first.quit!
+
+    # cleanup
+    File.delete(img_file)
+
+    assert_qemu_is_gone
+  end
+
+  def test_load_three_service
+    size = 40
+    0.upto(2) do |i|
+      img_file = File.join(File.dirname(__FILE__), 'data', "01service#{i}.img")
+      Susi::QEMU.create_img(size: size, path: img_file)
+    end
+
+    file = File.join(File.dirname(__FILE__), 'data', '01service.json')   
+    service = Susi::Service.new(file)
+
+    assert_equal 3, service.vms.count
+
+    0.upto(2) do |i|
+      assert_equal "n#{i}", service.vms[i].name
+      assert_equal "test/data/01service#{i}.img", service.vms[i].img
+      assert_equal 1024, service.vms[i].ram
+      assert_equal 5900 + i, service.vms[i].vnc
+      assert_equal 6000 + i, service.vms[i].qmp_port
+    end
+
+    service.quit!
+
+    assert_qemu_is_gone
+
+    # cleanup
+    0.upto(2) do |i|
+      img_file = File.join(File.dirname(__FILE__), 'data', "01service#{i}.img")
+      File.delete(img_file)
+    end
+  end
+
 end

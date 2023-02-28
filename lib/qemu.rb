@@ -50,7 +50,8 @@ module Susi
 
       qemu_arguments << "-daemonize"
 
-      `qemu-system-x86_64 #{qemu_arguments.join(' ')} 2>&1`
+      cmd = "qemu-system-x86_64 #{qemu_arguments.join(' ')} 2>&1"
+      result = `#{cmd}`
 
       change_vnc_password('susi')
     end
@@ -99,7 +100,17 @@ module Susi
     end
 
     def quit!
+      n = self.name
       qmp_single_cmd({execute: "quit"})
+
+      # wait for QEMU to quit
+      Timeout.timeout(5) do
+        loop do
+          result = `ps -ef | grep qemu-system | grep -v "grep" | grep "\\-name #{n}"`
+          break if result.empty?
+          sleep 0.1
+        end
+      end
     end
 
     def name
