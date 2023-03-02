@@ -59,4 +59,60 @@ module Susi
       end
     end
   end
+
+  class APIclient
+    attr_reader :port
+    attr_reader :imgs
+    attr_reader :vms
+
+    def initialize(port)
+      @port = port
+      @imgs = []
+      @vms = []
+    end
+
+    def create_img(size: nil)
+      img = APIimg.new(size: size)
+      @imgs << img
+      img
+    end
+
+    def add_vm(name: nil, img: nil, ram: nil, cpu: nil)
+      APIvm.new(name: name, img: img, ram: ram, cpu: ram)
+    end
+  end
+
+  class APIimg
+    def initialize(size: nil)
+    end
+
+    def delete!
+    end
+  end
+
+  class APIvm
+    def initialize(name: nil, img: nil, ram: nil, cpu: nil)
+      @running_state = false
+    end
+
+    def start!
+      @running_state = true
+    end
+
+    def running?
+      @running_state
+    end
+
+    def quit!
+      @running_state = false
+    end
+
+    def remove!
+      @running_state = false
+    end
+
+    def exists?
+      false
+    end
+  end
 end

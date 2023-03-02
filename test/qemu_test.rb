@@ -111,4 +111,24 @@ class QEMU_Test < Test::Unit::TestCase
     end
   end
 
+  def test_service_api_via_api
+    api_client = Susi::APIclient.new(7001)
+
+    num_of_img = api_client.imgs.count
+    img = api_client.create_img(size: 40)
+    assert api_client.imgs.count == num_of_img + 1, 'img not created'
+
+    vm = api_client.add_vm(name: "test", img: img, ram: 1024, cpu: 1)
+
+    vm.start!
+    assert vm.running?, 'vm is not running'
+
+    vm.quit!
+    assert !vm.running?, 'vm is still running'
+
+    vm.remove!
+    assert !vm.exists?, 'vm still exists'
+
+    img.delete!
+  end
 end
