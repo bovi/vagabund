@@ -1,0 +1,9 @@
+[package]
+name = "susi"
+version = "0.1.0"
+authors = ["Daniel Bovensiepen <oss@bovi.li>"]
+edition = "2021"
+
+[[test]]
+name = "main"
+path = "tests/main.rs"
