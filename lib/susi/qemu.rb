@@ -105,6 +105,7 @@ def start_vm(image_name, installer = nil)
   net = []
   net << "-net user"
   c('ports').each do |port|
+    puts "Port: #{port}"
     external, internal = port.split(':')
     net << ",hostfwd=tcp::#{external}-:#{internal}"
   end
@@ -281,6 +282,7 @@ def first_boot_init
     ssh.exec!("ln -s /mnt/pwd ~/pwd")
 
     c('tmpfs').each do |tfs|
+      puts "enable tmpfs in #{tfs}"
       create_mount_via_ssh(ssh, 'tmpfs', "/mnt/pwd/#{tfs}", 'tmpfs', 'size=512m')
     end
 
@@ -291,9 +293,9 @@ def first_boot_init
     unless c('shell').nil?
       log "Shell deployment:"
       c('shell').each do |cmd|
-        log "> #{cmd}" 
+        puts "# #{cmd}" 
         ssh.exec!("cd ~/pwd && " + cmd) do |c, s, d|
-          log d
+          puts d
         end
       end
     end
