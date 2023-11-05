@@ -108,7 +108,7 @@ def start_vm(image_name, installer = nil)
   args << "-vnc localhost:#{VNC_PORT},password=on"
 
   # other configuration
-  args << "-m 8G"
+  args << "-m #{c('ram')}G"
   args << "-display none"
   args << "-rtc base=localtime"
   args << "-daemonize"
@@ -187,9 +187,18 @@ def init_disk
 end
 
 def first_boot_init
+  Net::SSH.start("localhost", 'susi',
+                  :port => SSH_PORT, :password => 'susi') do |ssh|
+    # create user automatically
+    ssh.exec!("sudo useradd -m -s /bin/bash #{c('user')}")
+    ssh.exec!("echo '#{c('user')}:#{c('user')}' | sudo chpasswd")
+    # activate passwordless sudo
+    ssh.exec!("echo '#{c('user')} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/#{c('user')}")
+  end unless c('user') == 'susi'
+
   # login with password to the VM via net-ssh
-  Net::SSH.start("localhost", "susi",
-                  :port => SSH_PORT, :password => "susi") do |ssh|
+  Net::SSH.start("localhost", c('user'),
+                  :port => SSH_PORT, :password => c('user')) do |ssh|
     # copy public key
     ssh.exec!("mkdir -p .ssh")
     ssh.exec!("chmod 700 .ssh")
@@ -241,6 +250,18 @@ def first_boot_init
     ssh.exec!("sudo systemctl enable mnt-pwd.automount")
     ssh.exec!("sudo systemctl start mnt-pwd.automount") 
 
-    ssh.exec!("ln -s /mnt/pwd /home/susi/pwd")
+    ssh.exec!("sudo hostnamectl set-hostname #{c('id')}")
+
+    ssh.exec!("ln -s /mnt/pwd pwd")
+
+    unless c('shell').nil?
+      log "Shell deployment:"
+      c('shell').each do |cmd|
+        log "> #{cmd}" 
+        ssh.exec!(cmd) do |c, s, d|
+          log d
+        end
+      end
+    end
   end
 end

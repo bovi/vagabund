@@ -8,7 +8,7 @@ SUSI_HOME = "#{Dir.home}/.susi"
 SUSI_PWD = "#{Dir.pwd}/.susi"
 
 def log(msg)
-  log msg if $verbose
+  puts msg if $verbose
 end
 
 require_relative 'susi/config'
