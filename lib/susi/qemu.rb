@@ -258,7 +258,7 @@ def first_boot_init
       log "Shell deployment:"
       c('shell').each do |cmd|
         log "> #{cmd}" 
-        ssh.exec!(cmd) do |c, s, d|
+        ssh.exec!("cd ~/pwd && " + cmd) do |c, s, d|
           log d
         end
       end

@@ -14,8 +14,9 @@ def init_config
 
   config = {}
   config['id'] = unique_id
-  config['user'] = 'susi'
+  config['user'] = ENV['USER'] || 'susi'
   config['ram'] = 8
+  config['shell'] = []
 
   File.open(CONFIG, "w") do |f|
     f.write(config.to_json)
