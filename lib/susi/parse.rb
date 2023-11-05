@@ -50,6 +50,10 @@ def parse_args
     opts.on("-d", "--powerdown", "Power down the VM") do |halt|
       options[:halt] = halt
     end
+
+    opts.on("-v", "--verbose", "Verbose output") do |v|
+      options[:verbose] = v
+    end
   end.parse!
 
   options

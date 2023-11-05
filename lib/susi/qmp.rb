@@ -4,15 +4,15 @@ def qmp(command)
   socket.puts('{"execute":"qmp_capabilities"}')
   response = JSON.parse(socket.gets)
   if response["return"] == {}
-    puts "QMP connection established"
+    log "QMP connection established"
   else
-    puts "QMP connection failed"
+    log "QMP connection failed"
   end
   socket.puts(command)
   response = JSON.parse(socket.gets)
   socket.close
   if response["error"]
-    puts command
+    log command
     raise response["error"]["desc"]
   end
   response

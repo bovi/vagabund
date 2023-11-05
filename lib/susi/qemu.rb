@@ -2,6 +2,7 @@ require 'json'
 require 'socket'
 require 'net/ssh'
 require 'net/scp'
+require 'fileutils'
 
 require_relative 'qmp'
 
@@ -9,13 +10,11 @@ DEFAULT_QCOW = "#{SUSI_HOME}/default.qcow2"
 DISK = "#{SUSI_PWD}/disk.qcow2"
 
 unless system("which qemu-system-x86_64 > /dev/null")
-  puts "Please install qemu"
-  exit
+  raise "Please install qemu"
 end
 
 unless system("which qemu-img > /dev/null")
-  puts "Please install qemu-img"
-  exit
+  raise "Please install qemu-img"
 end
 
 def disk_exists?
@@ -25,13 +24,13 @@ end
 # create a QCOW2 image
 def create_qcow2(image_name, size)
   cmd = "qemu-img create -f qcow2 #{image_name} #{size}G"
-  puts cmd
+  log cmd
   system(cmd)
 end
 
 def clone_qcow2(image_name, clone_name)
-  cmd = "qemu-img create -f qcow2 -F qcow2 -b #{image_name} #{clone_name}"
-  puts cmd
+  cmd = "qemu-img create -f qcow2 -F qcow2 -b #{image_name} #{clone_name} 2>&1 > /dev/null"
+  log cmd
   system(cmd)
 end
 
@@ -40,7 +39,7 @@ def list_vms
   ps.split("\n").each do |line|
     id = line.match(/-name\s(\w+)/)
     if id
-      puts
+      puts 
       puts "ID: " + id[1]
       vnc_port = line.match(/-vnc\slocalhost:(\d+)/)
       if vnc_port
@@ -87,6 +86,7 @@ def start_vm(image_name, installer = nil)
   else
     args << "-boot c"
   end
+  args << "-virtfs local,path=#{Dir.pwd},mount_tag=pwd,security_model=none,id=pwd"
 
   # name configuration
   folder = File.dirname(image_name)
@@ -116,30 +116,30 @@ def start_vm(image_name, installer = nil)
   if kvm_available?
     args << "-enable-kvm"
   else
-    puts "KVM is not available. Running in emulation mode."
+    log "KVM is not available. Running in emulation mode."
   end
 
   cmd = "qemu-system-x86_64 #{args.join(" ")}"
-  puts cmd
+  log cmd
   system(cmd)
 
   10.times do |i|
     sleep 1
     if vm_running?
-      puts "VM is running"
+      log "VM is running"
       break
     else
       raise "VM is not running" if i == 9
-      puts "."
+      log "."
     end
   end
 
   response = qmp_execute('query-status')
   if response["return"]["running"]
-    puts "VM is running"
+    log "VM is running"
     response = qmp('{"execute":"change-vnc-password", "arguments": {"password": "susi"}}')
     if response["return"] == {}
-      puts "VNC password set"
+      log "VNC password set"
     else
       raise "VNC password not set"
     end
@@ -153,7 +153,11 @@ def start_vm_with_config
 end
 
 def quit_vm
-  qmp_execute('quit')
+  begin
+    qmp_execute('quit')
+  rescue
+    log "VM is not running"
+  end
 end
 
 def powerdown_vm
@@ -173,11 +177,16 @@ def init_vm
   raise 'project already initialized' if config_exists?
 
   init_config
+  init_disk
+end
 
+def init_disk
   clone_qcow2(DEFAULT_QCOW, DISK)
-
   start_vm(DISK)
+  first_boot_init
+end
 
+def first_boot_init
   # login with password to the VM via net-ssh
   Net::SSH.start("localhost", "susi",
                   :port => SSH_PORT, :password => "susi") do |ssh|
@@ -194,5 +203,44 @@ def init_vm
     # deactivate ssh password authentication
     ssh.exec!("sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config")
     ssh.exec!("sudo systemctl restart sshd")
+
+    # add 9p filesystem to /etc/fstab
+    ssh.exec!("sudo mkdir -p /mnt/pwd")
+    ssh.exec!("sudo chmod 777 /mnt/pwd")
+
+    # create systemd mount unit
+    mount_unit = <<~MOUNT_UNIT
+      [Unit]
+      Description=9p mount
+
+      [Mount]
+      What=pwd
+      Where=/mnt/pwd
+      Type=9p
+      Options=trans=virtio,version=9p2000.L
+
+      [Install]
+      WantedBy=multi-user.target
+    MOUNT_UNIT
+    ssh.exec!("echo '#{mount_unit}' | sudo tee /etc/systemd/system/mnt-pwd.mount")
+
+    # create systemd automount unit
+    automount_unit = <<~AUTOMOUNT_UNIT
+      [Unit]
+      Description=9p automount
+
+      [Automount]
+      Where=/mnt/pwd
+
+      [Install]
+      WantedBy=multi-user.target
+    AUTOMOUNT_UNIT
+    ssh.exec!("echo '#{automount_unit}' | sudo tee /etc/systemd/system/mnt-pwd.automount")
+
+    # enable and start the automount unit
+    ssh.exec!("sudo systemctl enable mnt-pwd.automount")
+    ssh.exec!("sudo systemctl start mnt-pwd.automount") 
+
+    ssh.exec!("ln -s /mnt/pwd /home/susi/pwd")
   end
 end
