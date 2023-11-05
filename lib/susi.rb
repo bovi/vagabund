@@ -29,7 +29,7 @@ def execute_program(options)
     end
   elsif options[:list]
     list_vms
-  elsif options[:ssh]
+  elsif options[:ssh] or ARGV[0] == "ssh"
     ssh_vm
   else
     if Dir.exist?(SUSI_PWD)
