@@ -41,6 +41,23 @@ def list_vms
     if id
       puts 
       puts "ID: " + id[1]
+
+      memory = line.match(/-m\s(\d+)/)
+      if memory
+        puts "\tRAM: #{memory[1]}G"
+      end
+
+      ports = []
+      line.scan(/hostfwd=tcp::(\d+)-:(\d+)/) do |external, internal|
+        ports << "#{external}:#{internal}"
+      end
+      if ports.any?
+        puts "\tPorts:"
+        ports.each do |p|
+          puts "\t  - #{p}"
+        end
+      end      
+
       vnc_port = line.match(/-vnc\slocalhost:(\d+)/)
       if vnc_port
         puts "\tvnc://localhost:#{vnc_port[1].to_i + 5900} "
@@ -48,18 +65,6 @@ def list_vms
       qmp_port = line.match(/-qmp\stcp:localhost:(\d+)/)
       if qmp_port
         puts "\tqmp://localhost:#{qmp_port[1]} "
-      end
-      ssh_port = line.match(/hostfwd=tcp::(\d+)-:22/)
-      if ssh_port
-        puts "\tssh://localhost:#{ssh_port[1]} "
-      end
-      http_port = line.match(/hostfwd=tcp::(\d+)-:80/)
-      if http_port
-        puts "\thttp://localhost:#{http_port[1]} "
-      end
-      https_port = line.match(/hostfwd=tcp::(\d+)-:443/)
-      if https_port
-        puts "\thttps://localhost:#{https_port[1]} "
       end
     end
   end
@@ -86,7 +91,7 @@ def start_vm(image_name, installer = nil)
   else
     args << "-boot c"
   end
-  args << "-virtfs local,path=#{Dir.pwd},mount_tag=pwd,security_model=none,id=pwd"
+  args << "-virtfs local,path=#{Dir.pwd},mount_tag=pwd,security_model=mapped,id=pwd"
 
   # name configuration
   folder = File.dirname(image_name)
@@ -99,9 +104,11 @@ def start_vm(image_name, installer = nil)
 
   net = []
   net << "-net user"
+  c('ports').each do |port|
+    external, internal = port.split(':')
+    net << ",hostfwd=tcp::#{external}-:#{internal}"
+  end
   net << ",hostfwd=tcp::#{SSH_PORT}-:22"
-  net << ",hostfwd=tcp::7080-:80"
-  net << ",hostfwd=tcp::7443-:443"
   args << net.join
 
   args << "-qmp tcp:localhost:#{QMP_PORT},server,nowait"
@@ -186,73 +193,100 @@ def init_disk
   first_boot_init
 end
 
+def create_mount_via_ssh(ssh, what, where, type, options)
+  where_fn = where.gsub('/', '-').sub('-', '')
+
+  log "create mount point #{where_fn} #{type}"
+
+  ssh.exec!("sudo mkdir -p #{where}")
+  ssh.exec!("sudo chmod 777 #{where}")
+  mount_unit = <<~MOUNT_UNIT
+    [Unit]
+    Description=#{where_fn} #{type} mount unit
+
+    [Mount]
+    What=#{what}
+    Where=#{where}
+    Type=#{type}
+    Options=#{options}
+
+    [Install]
+    WantedBy=multi-user.target
+  MOUNT_UNIT
+  ssh.exec!("echo '#{mount_unit}' | sudo tee /etc/systemd/system/#{where_fn}.mount")
+  automount_unit = <<~AUTOMOUNT_UNIT
+    [Unit]
+    Description=#{where_fn} automount
+
+    [Automount]
+    Where=#{where}
+
+    [Install]
+    WantedBy=multi-user.target
+  AUTOMOUNT_UNIT
+  ssh.exec!("echo '#{automount_unit}' | sudo tee /etc/systemd/system/#{where_fn}.automount")
+  ssh.exec!("sudo systemctl enable #{where_fn}.automount")
+  ssh.exec!("sudo systemctl start #{where_fn}.automount") 
+end
+
 def first_boot_init
-  Net::SSH.start("localhost", 'susi',
-                  :port => SSH_PORT, :password => 'susi') do |ssh|
-    # create user automatically
-    ssh.exec!("sudo useradd -m -s /bin/bash #{c('user')}")
-    ssh.exec!("echo '#{c('user')}:#{c('user')}' | sudo chpasswd")
-    # activate passwordless sudo
-    ssh.exec!("echo '#{c('user')} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/#{c('user')}")
-  end unless c('user') == 'susi'
+  unless c('user') == 'susi'
+    Net::SSH.start("localhost", 'susi',
+                    :port => SSH_PORT, :password => 'susi') do |ssh|
+      log "create custom user"
+      ssh.exec!("sudo useradd -m -s /bin/bash #{c('user')}")
+      ssh.exec!("echo '#{c('user')}:#{c('user')}' | sudo chpasswd")
+      ssh.exec!("echo '#{c('user')} ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/#{c('user')}")
+    end
+
+    Net::SSH.start("localhost", c('user'),
+                    :port => SSH_PORT, :password => c('user')) do |ssh|
+      log "change userid for susi"
+      ssh.exec!("sudo usermod -u 9999 susi")
+    end
+
+    Net::SSH.start("localhost", 'susi',
+                    :port => SSH_PORT, :password => 'susi') do |ssh|
+      log "change userid of custom user to 1000"
+      ssh.exec!("sudo usermod -u 1000 #{c('user')}")
+    end
+
+    Net::SSH.start("localhost", c('user'),
+                    :port => SSH_PORT, :password => c('user')) do |ssh|
+      log "delete susi user"
+      ssh.exec!("sudo userdel -r susi")
+      ssh.exec!("sudo rm -Rf /home/susi")
+    end
+  end
 
   # login with password to the VM via net-ssh
   Net::SSH.start("localhost", c('user'),
                   :port => SSH_PORT, :password => c('user')) do |ssh|
-    # copy public key
+    log "copy public keys"
     ssh.exec!("mkdir -p .ssh")
     ssh.exec!("chmod 700 .ssh")
     ssh.exec!("touch .ssh/authorized_keys")
     ssh.scp.upload!("#{Dir.home}/.ssh/id_ed25519.pub", ".ssh/authorized_keys")
     ssh.exec!("chmod 600 .ssh/authorized_keys")
-    # copy private key
+
+    log "copy private key"
     ssh.scp.upload!("#{Dir.home}/.ssh/id_ed25519", ".ssh/id_ed25519")
     ssh.exec!("chmod 600 .ssh/id_ed25519")
 
-    # deactivate ssh password authentication
+    log "deactivate ssh password authentication"
     ssh.exec!("sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config")
     ssh.exec!("sudo systemctl restart sshd")
 
-    # add 9p filesystem to /etc/fstab
-    ssh.exec!("sudo mkdir -p /mnt/pwd")
-    ssh.exec!("sudo chmod 777 /mnt/pwd")
+    create_mount_via_ssh(ssh, 'pwd', '/mnt/pwd', '9p', 'trans=virtio,version=9p2000.L')
+    ssh.exec!("ln -s /mnt/pwd ~/pwd")
 
-    # create systemd mount unit
-    mount_unit = <<~MOUNT_UNIT
-      [Unit]
-      Description=9p mount
+    c('tmpfs').each do |tfs|
+      create_mount_via_ssh(ssh, 'tmpfs', "/mnt/pwd/#{tfs}", 'tmpfs', 'size=512m')
+    end
 
-      [Mount]
-      What=pwd
-      Where=/mnt/pwd
-      Type=9p
-      Options=trans=virtio,version=9p2000.L
-
-      [Install]
-      WantedBy=multi-user.target
-    MOUNT_UNIT
-    ssh.exec!("echo '#{mount_unit}' | sudo tee /etc/systemd/system/mnt-pwd.mount")
-
-    # create systemd automount unit
-    automount_unit = <<~AUTOMOUNT_UNIT
-      [Unit]
-      Description=9p automount
-
-      [Automount]
-      Where=/mnt/pwd
-
-      [Install]
-      WantedBy=multi-user.target
-    AUTOMOUNT_UNIT
-    ssh.exec!("echo '#{automount_unit}' | sudo tee /etc/systemd/system/mnt-pwd.automount")
-
-    # enable and start the automount unit
-    ssh.exec!("sudo systemctl enable mnt-pwd.automount")
-    ssh.exec!("sudo systemctl start mnt-pwd.automount") 
-
+    log "set hostname"
     ssh.exec!("sudo hostnamectl set-hostname #{c('id')}")
-
-    ssh.exec!("ln -s /mnt/pwd pwd")
+    ssh.exec!("sudo sed -i 's/susivm/#{c('id')}/g' /etc/hosts")
 
     unless c('shell').nil?
       log "Shell deployment:"
